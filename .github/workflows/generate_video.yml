@@ -10,7 +10,7 @@ on:
         description: '曲のインデックス (0始まり)'
         required: true
       slot:
-        description: '投稿枠'
+        description: '投稿枠 (morning / evening)'
         required: true
         type: choice
         options:
@@ -20,6 +20,7 @@ on:
 jobs:
   generate-and-upload:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,7 +30,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install FFmpeg
+      - name: Install system dependencies (FFmpeg)
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-dejavu
@@ -70,7 +71,7 @@ jobs:
             --slot  ${{ github.event.inputs.slot }} \
             --video $VIDEO
 
-      - name: Upload video as artifact
+      - name: Upload output video as artifact
         uses: actions/upload-artifact@v4
         with:
           name: video-${{ github.event.inputs.date }}-${{ github.event.inputs.slot }}

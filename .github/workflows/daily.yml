@@ -2,12 +2,14 @@ name: Daily Music Discovery
 
 on:
   schedule:
+    # 毎朝7時 JST = UTC 22時 (前日)
     - cron: '0 22 * * *'
-  workflow_dispatch:
+  workflow_dispatch:  # 手動実行も可能
 
 jobs:
   discover-and-notify:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run discovery
+      - name: Run discovery (Claude API)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python scripts/discover.py
@@ -32,7 +34,7 @@ jobs:
           WEBHOOK_BASE_URL:   ${{ secrets.WEBHOOK_BASE_URL }}
         run: python scripts/send_email.py
 
-      - name: Upload discovery data
+      - name: Upload discovery data as artifact
         uses: actions/upload-artifact@v4
         with:
           name: discovery-data
