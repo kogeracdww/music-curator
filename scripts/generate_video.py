@@ -91,27 +91,26 @@ def render_frame(frame_idx: int, dancer_frames: list, base_img: Image.Image, son
     def fa(start, dur=20):
         return int(255 * min(1.0, max(0.0, (frame_idx - start) / dur)))
 
-    # ── ゾーンA: コメント (上部グレー) ──
+    # ── ゾーンA: コメント (上部グレー・英語のみ) ──
     a = fa(5)
     if a:
-        comment_ja = song.get("comment_ja", "")
         comment_en = song.get("comment_en", "")
+        font_en = gf(76, bold=True)
 
-        font_ja = gf(76, bold=True)
-        font_en = gf(60, bold=True)
+        words = comment_en.split()
+        mid = len(words) // 2
+        line1 = " ".join(words[:mid])
+        line2 = " ".join(words[mid:])
 
-        # 日本語（上）
-        bb = draw.textbbox((0, 0), comment_ja, font=font_ja)
-        tw = bb[2] - bb[0]
-        x = max(60, (W - tw) // 2)
-        draw.text((x, 70), comment_ja, font=font_ja, fill=(*WHITE_TEXT, a))
-
-        # 英語（下）
-        bb2 = draw.textbbox((0, 0), comment_en, font=font_en)
-        tw2 = bb2[2] - bb2[0]
-        x2 = max(60, (W - tw2) // 2)
-        draw.text((x2, 190), comment_en, font=font_en,
-                  fill=(*WHITE_TEXT, int(a * 0.85)))
+        for idx_line, line in enumerate([line1, line2]):
+            if not line:
+                continue
+            bb = draw.textbbox((0, 0), line, font=font_en)
+            tw = bb[2] - bb[0]
+            x = max(60, (W - tw) // 2)
+            y_pos = 100 + idx_line * 110
+            draw.text((x, y_pos), line, font=font_en,
+                      fill=(*WHITE_TEXT, a))
 
     # ── ゾーンB: ジャケット画像エリア (クリーム) ──
     # ジャケットはプレースホルダー（将来はURL取得）
