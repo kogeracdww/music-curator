@@ -108,6 +108,27 @@ def save_results(songs: list, weekday: int, config: dict) -> str:
 
 
 def update_today_playlist(songs: list):
+    def search_youtube_video_id(youtube, artist: str, title: str) -> str:
+    """YouTube Data APIで曲を検索してVideo IDを取得"""
+    try:
+        query = f"{artist} {title}"
+        response = youtube.search().list(
+            part="snippet",
+            q=query,
+            type="video",
+            maxResults=1,
+            videoCategoryId="10"  # Music
+        ).execute()
+
+        items = response.get("items", [])
+        if items:
+            vid = items[0]["id"]["videoId"]
+            return vid
+        return ""
+    except Exception as e:
+        print(f"  ⚠️  YouTube検索失敗: {artist} - {title}: {e}")
+        return ""
+        
     client_secret_str = os.environ.get("YOUTUBE_CLIENT_SECRET", "")
     refresh_token = os.environ.get("YOUTUBE_REFRESH_TOKEN", "")
 
@@ -144,8 +165,10 @@ def update_today_playlist(songs: list):
         for song in songs:
             vid = song.get("youtube_video_id", "").strip()
             if not vid:
-                print(f"  スキップ（Video IDなし）: {song['artist']} - {song['title']}")
-                continue
+                print(f"  🔍 YouTube検索中: {song['artist']} - {song['title']}")
+                vid = search_youtube_video_id(youtube, song["artist"], song["title"])
+                if vid:
+                    song["youtube_video_id"] = vid
             try:
                 youtube.playlistItems().insert(
                     part="snippet",
