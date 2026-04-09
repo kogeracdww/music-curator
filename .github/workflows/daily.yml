@@ -2,9 +2,8 @@ name: Daily Music Discovery
 
 on:
   schedule:
-    # 毎朝7時 JST = UTC 22時 (前日)
     - cron: '0 22 * * *'
-  workflow_dispatch:  # 手動実行も可能
+  workflow_dispatch:
 
 jobs:
   discover-and-notify:
@@ -22,9 +21,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run discovery (Claude API)
+      - name: Run discovery (Claude API + YouTube TODAY更新)
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY:      ${{ secrets.ANTHROPIC_API_KEY }}
+          YOUTUBE_CLIENT_SECRET:  ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN:  ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          YT_PLAYLIST_TODAY:      ${{ secrets.YT_PLAYLIST_TODAY }}
         run: python scripts/discover.py
 
       - name: Send email
