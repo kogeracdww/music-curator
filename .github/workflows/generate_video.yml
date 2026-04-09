@@ -1,0 +1,78 @@
+name: Generate and Upload Video
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: '対象日 (YYYY-MM-DD)'
+        required: true
+      idx:
+        description: '曲のインデックス (0始まり)'
+        required: true
+      slot:
+        description: '投稿枠 (morning / evening)'
+        required: true
+        type: choice
+        options:
+          - morning
+          - evening
+
+jobs:
+  generate-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download discovery data
+        uses: actions/download-artifact@v4
+        with:
+          name: discovery-data
+          path: data/
+        continue-on-error: true
+
+      - name: Generate video
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+        run: |
+          python scripts/generate_video.py \
+            --date ${{ github.event.inputs.date }} \
+            --idx  ${{ github.event.inputs.idx }} \
+            --slot ${{ github.event.inputs.slot }}
+
+      - name: Upload to YouTube
+        env:
+          YOUTUBE_CLIENT_SECRET:  ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN:  ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          YT_PLAYLIST_TODAY:      ${{ secrets.YT_PLAYLIST_TODAY }}
+          YT_PLAYLIST_YESTERDAY:  ${{ secrets.YT_PLAYLIST_YESTERDAY }}
+          YT_PLAYLIST_SELECTED_A: ${{ secrets.YT_PLAYLIST_SELECTED_A }}
+          YT_PLAYLIST_SELECTED_B: ${{ secrets.YT_PLAYLIST_SELECTED_B }}
+          APP_URL:                ${{ secrets.APP_URL }}
+        run: |
+          VIDEO=$(ls output/*.mp4 | head -1)
+          python scripts/youtube_upload.py \
+            --date  ${{ github.event.inputs.date }} \
+            --idx   ${{ github.event.inputs.idx }} \
+            --slot  ${{ github.event.inputs.slot }} \
+            --video $VIDEO
+
+      - name: Upload output video
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-${{ github.event.inputs.date }}-${{ github.event.inputs.slot }}
+          path: output/*.mp4
+          retention-days: 3
