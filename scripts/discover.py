@@ -107,9 +107,8 @@ def save_results(songs: list, weekday: int, config: dict) -> str:
     return path
 
 
-def update_today_playlist(songs: list):
-    def search_youtube_video_id(youtube, artist: str, title: str) -> str:
-        """YouTube Data APIで曲を検索してVideo IDを取得"""
+def search_youtube_video_id(youtube, artist: str, title: str) -> str:
+    """YouTube Data APIで曲を検索してVideo IDを取得"""
     try:
         query = f"{artist} {title}"
         response = youtube.search().list(
@@ -117,18 +116,19 @@ def update_today_playlist(songs: list):
             q=query,
             type="video",
             maxResults=1,
-            videoCategoryId="10"  # Music
+            videoCategoryId="10"
         ).execute()
-
         items = response.get("items", [])
         if items:
-            vid = items[0]["id"]["videoId"]
-            return vid
+            return items[0]["id"]["videoId"]
         return ""
     except Exception as e:
         print(f"  ⚠️  YouTube検索失敗: {artist} - {title}: {e}")
         return ""
-        
+
+
+def update_today_playlist(songs: list):
+    """YouTube TODAYプレイリストを更新"""
     client_secret_str = os.environ.get("YOUTUBE_CLIENT_SECRET", "")
     refresh_token = os.environ.get("YOUTUBE_REFRESH_TOKEN", "")
 
@@ -154,6 +154,7 @@ def update_today_playlist(songs: list):
 
         playlist_id = os.environ["YT_PLAYLIST_TODAY"]
 
+        # 既存アイテムを全削除
         existing = youtube.playlistItems().list(
             part="id", playlistId=playlist_id, maxResults=50
         ).execute()
@@ -161,6 +162,7 @@ def update_today_playlist(songs: list):
             youtube.playlistItems().delete(id=item["id"]).execute()
         print("🗑  TODAYプレイリストをクリア")
 
+        # 各曲をYouTube検索してプレイリストに追加
         added = 0
         for song in songs:
             vid = song.get("youtube_video_id", "").strip()
@@ -169,6 +171,11 @@ def update_today_playlist(songs: list):
                 vid = search_youtube_video_id(youtube, song["artist"], song["title"])
                 if vid:
                     song["youtube_video_id"] = vid
+
+            if not vid:
+                print(f"  スキップ（Video IDなし）: {song['artist']} - {song['title']}")
+                continue
+
             try:
                 youtube.playlistItems().insert(
                     part="snippet",
