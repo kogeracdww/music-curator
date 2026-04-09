@@ -109,7 +109,7 @@ def save_results(songs: list, weekday: int, config: dict) -> str:
 
 def update_today_playlist(songs: list):
     def search_youtube_video_id(youtube, artist: str, title: str) -> str:
-    """YouTube Data APIで曲を検索してVideo IDを取得"""
+        """YouTube Data APIで曲を検索してVideo IDを取得"""
     try:
         query = f"{artist} {title}"
         response = youtube.search().list(
