@@ -41,7 +41,7 @@ def build_caption(songs: list, slot: str, config: dict) -> dict:
         datetime.timezone(datetime.timedelta(hours=9))
     ).strftime("%Y.%m.%d")
 
-    emoji = "☕" if slot == "morning" else "🌙"
+    emoji = "☕️✨" if slot == "morning" else "🌙"
     title = f"{emoji} {slot_cfg['title_prefix']} | {today}"
 
     # 曲リスト
