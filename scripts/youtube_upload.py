@@ -204,38 +204,61 @@ def update_selected_playlist(youtube, songs: list, slot: str):
 
 
 def main():
-    import sys
     parser = argparse.ArgumentParser()
     parser.add_argument("--date",  required=True)
     parser.add_argument("--slot",  required=True, choices=["morning", "evening"])
     parser.add_argument("--video", required=True)
     args = parser.parse_args()
 
-    # 発掘データ読み込み
-    path = f"data/discovery_{args.date}_{args.slot}.json"
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    songs = data["songs"]
     slot_cfg = SLOT_CONFIG[args.slot]
     slot_label = "朝" if args.slot == "morning" else "深夜"
     print(f"📤 YouTube投稿開始: {slot_cfg['title_prefix']} [{slot_label}枠]")
 
     youtube = get_youtube_client()
 
-    # キャプション生成
-    caption = build_caption(songs, args.slot, data)
+    # プレイリストから現在の曲を取得（discoveryデータ不要）
+    playlist_id = os.environ.get(
+        "YT_PLAYLIST_TODAY" if args.slot == "morning" else "YT_PLAYLIST_YESTERDAY",
+        ""
+    )
+    items = []
+    next_page = None
+    while True:
+        params = dict(part="snippet", playlistId=playlist_id, maxResults=50)
+        if next_page:
+            params["pageToken"] = next_page
+        resp = youtube.playlistItems().list(**params).execute()
+        items.extend(resp.get("items", []))
+        next_page = resp.get("nextPageToken")
+        if not next_page:
+            break
+
+    songs = []
+    for item in items:
+        snippet = item["snippet"]
+        vid = snippet["resourceId"]["videoId"]
+        songs.append({
+            "artist": snippet.get("videoOwnerChannelTitle", "Unknown"),
+            "title": snippet["title"],
+            "youtube_video_id": vid,
+            "youtube_url": f"https://youtu.be/{vid}",
+        })
+
+    print(f"  📋 {len(songs)}曲取得")
+
+    # キャプション生成・動画アップロード
+    caption = build_caption(songs, args.slot, {})
     scheduled_time = get_scheduled_time(args.slot)
     print(f"📅 予約投稿時刻: {scheduled_time}")
 
-    # 動画アップロード
     video_id = upload_video(youtube, args.video, caption, scheduled_time)
 
-    # Selectedプレイリスト更新（4日分キープ）
-    print(f"📋 プレイリスト更新中...")
+    # Selectedプレイリスト更新
+    print("📋 Selectedプレイリスト更新中...")
     update_selected_playlist(youtube, songs, args.slot)
 
     # 結果保存
+    os.makedirs("data", exist_ok=True)
     result = {
         "date": args.date,
         "slot": args.slot,
@@ -243,7 +266,6 @@ def main():
         "scheduled_time": scheduled_time,
         "song_count": len(songs),
     }
-
     with open(f"data/upload_{args.date}_{args.slot}.json", "w",
               encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
@@ -252,5 +274,4 @@ def main():
 
 
 if __name__ == "__main__":
-    import sys
     main()
