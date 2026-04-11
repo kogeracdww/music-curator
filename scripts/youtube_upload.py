@@ -1,9 +1,12 @@
 """
 STEP D-2: youtube_upload.py
 生成した動画をYouTubeに予約投稿し、プレイリストを更新する
+・Todayプレイリスト：毎日10曲入れ替え
+・Selected/Midnightプレイリスト：4日分40曲をキープ（古い曲を削除）
 """
 
 import os
+import sys
 import json
 import datetime
 import argparse
@@ -12,9 +15,11 @@ from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import SLOT_CONFIG, PLAYLIST_RULES
+
 
 def get_youtube_client():
-    """YouTube APIクライアントを取得"""
     client_secret = json.loads(os.environ["YOUTUBE_CLIENT_SECRET"])
     refresh_token = os.environ["YOUTUBE_REFRESH_TOKEN"]
 
@@ -25,52 +30,61 @@ def get_youtube_client():
         client_id=client_secret["installed"]["client_id"],
         client_secret=client_secret["installed"]["client_secret"],
     )
-
-    # トークンをリフレッシュ
     creds.refresh(Request())
-
     return build("youtube", "v3", credentials=creds)
 
 
-def build_caption(song: dict, slot: str) -> dict:
+def build_caption(songs: list, slot: str, config: dict) -> dict:
     """タイトルと説明文を生成"""
-    slot_label = "朝" if slot == "morning" else "夕"
-    country_tag = song.get("country", "").replace(" ", "")
-    genre_tag = song.get("genre", "").replace(" ", "")
-    app_url = os.environ.get("APP_URL", "yourapp.com")
+    slot_cfg = SLOT_CONFIG[slot]
+    today = datetime.datetime.now(
+        datetime.timezone(datetime.timedelta(hours=9))
+    ).strftime("%Y.%m.%d")
 
-    title = f"{song['artist']} - {song['title']} | {song['country']} · {song['genre']}"
-    # YouTubeタイトルは100文字以内
-    if len(title) > 95:
-        title = title[:92] + "..."
+    emoji = "☕️✨" if slot == "morning" else "🌙"
+    title = f"{emoji} {slot_cfg['title_prefix']} | {today}"
 
-    description = f"""🌍 今日の発掘 / Today's Discovery
+    # 曲リスト
+    song_list = "\n".join([
+        f"{i+1:02d}. {s['artist']} - {s['title']}"
+        for i, s in enumerate(songs)
+    ])
 
-{song['artist']} - {song['title']}
-{song['country']} · {song['genre']} · フォロワー約{song['followers']}人
+    # プレイリストURL
+    playlist_id = os.environ.get(
+        "YT_PLAYLIST_TODAY" if slot == "morning" else "YT_PLAYLIST_YESTERDAY",
+        ""
+    )
+    playlist_url = f"https://www.youtube.com/playlist?list={playlist_id}"
 
-{song['comment_ja']}
-{song['comment_en']}
+    # ジャンルタグ（スペース・括弧を除去・小文字化）
+    genre_tags = " ".join([
+        "#" + g.lower().replace(" ", "").replace("(", "").replace(")", "").replace("-", "")
+        for g in slot_cfg["genres"]
+    ])
 
-🎧 Listen to this song:
-▶ YouTube → (概要欄参照)
-♪ Spotify → (概要欄参照)
-🍎 Apple Music → (概要欄参照)
-🛒 Tower Records → (概要欄参照)
+    app_url = "https://play.google.com/store/apps/dev?id=5374692864597792516"
+
+    description = f"""{emoji} {slot_cfg['title_prefix']}
+{today}
+
+🎵 Tracklist
+{song_list}
+
+▶ YouTube Playlist
+{playlist_url}
+
+#musicdiscovery {genre_tags}
 
 ━━━━━━━━━━━━
-🔗 発掘した音楽をもっと深く楽しむ → {app_url}
-━━━━━━━━━━━━
+🔗 {app_url}
 
-#musicdiscovery #unknownartist #{country_tag} #{genre_tag}
-#undergroundmusic #indiemusic #newmusic
+We'll offer simple products that give you a little boost every day.
 """
 
-    tags = [
-        "musicdiscovery", "unknownartist", "undergroundmusic",
-        "indiemusic", "newmusic",
-        song["country"], song["genre"],
-        song["artist"], song["title"],
+    tags = ["musicdiscovery"] + [
+        g.lower().replace(" ", "").replace("(", "").replace(")", "").replace("-", "")
+        for g in slot_cfg["genres"]
     ]
 
     return {
@@ -81,48 +95,42 @@ def build_caption(song: dict, slot: str) -> dict:
 
 
 def get_scheduled_time(slot: str) -> str:
-    """予約投稿時刻を取得 (RFC3339形式)"""
+    """予約投稿時刻を取得"""
     now_jst = datetime.datetime.now(
         datetime.timezone(datetime.timedelta(hours=9))
     )
     today = now_jst.date()
 
-    if slot == "morning":
-        post_time = datetime.datetime(
-            today.year, today.month, today.day, 8, 0, 0,
-            tzinfo=datetime.timezone(datetime.timedelta(hours=9))
-        )
-    else:
-        post_time = datetime.datetime(
-            today.year, today.month, today.day, 19, 0, 0,
-            tzinfo=datetime.timezone(datetime.timedelta(hours=9))
-        )
+    hour = 8 if slot == "morning" else 19
+    post_time = datetime.datetime(
+        today.year, today.month, today.day, hour, 0, 0,
+        tzinfo=datetime.timezone(datetime.timedelta(hours=9))
+    )
 
-    # 過去の時刻なら翌日に
     if post_time <= now_jst:
         post_time += datetime.timedelta(days=1)
 
     return post_time.isoformat()
 
 
-def upload_video(youtube, video_path: str, caption: dict, scheduled_time: str) -> str:
+def upload_video(youtube, video_path: str, caption: dict,
+                 scheduled_time: str) -> str:
     """動画をアップロード"""
     body = {
         "snippet": {
             "title": caption["title"],
             "description": caption["description"],
             "tags": caption["tags"],
-            "categoryId": "10",  # Music
+            "categoryId": "10",
         },
         "status": {
-            "privacyStatus": "private",  # 予約投稿はprivateで作成後publishAtを設定
+            "privacyStatus": "private",
             "publishAt": scheduled_time,
             "selfDeclaredMadeForKids": False,
         },
     }
 
     media = MediaFileUpload(video_path, mimetype="video/mp4", resumable=True)
-
     request = youtube.videos().insert(
         part="snippet,status",
         body=body,
@@ -140,88 +148,137 @@ def upload_video(youtube, video_path: str, caption: dict, scheduled_time: str) -
     return video_id
 
 
-def add_to_playlist(youtube, video_id: str, playlist_id: str):
-    """動画をプレイリストに追加"""
-    youtube.playlistItems().insert(
-        part="snippet",
-        body={
-            "snippet": {
-                "playlistId": playlist_id,
-                "resourceId": {
-                    "kind": "youtube#video",
-                    "videoId": video_id,
-                },
-                "position": 0,  # 先頭に追加
-            }
-        }
-    ).execute()
-    print(f"✅ プレイリストに追加: {playlist_id}")
+def update_selected_playlist(youtube, songs: list, slot: str):
+    """
+    Selected/Midnightプレイリストを更新
+    ・今日の10曲を先頭に追加
+    ・4日前（40曲以降）の曲を削除
+    """
+    if slot == "morning":
+        playlist_id = os.environ["YT_PLAYLIST_SELECTED_A"]
+    else:
+        playlist_id = os.environ["YT_PLAYLIST_SELECTED_B"]
 
+    keep_days = PLAYLIST_RULES["keep_days"]
+    songs_per_day = PLAYLIST_RULES["songs_per_day"]
+    max_songs = keep_days * songs_per_day  # 40曲
 
-def update_today_playlist(youtube, video_id: str):
-    """TODAYプレイリストを更新（既存を削除して追加）"""
-    playlist_id = os.environ["YT_PLAYLIST_TODAY"]
+    # 既存アイテムを取得
+    existing_items = []
+    next_page = None
+    while True:
+        params = dict(part="id,snippet", playlistId=playlist_id, maxResults=50)
+        if next_page:
+            params["pageToken"] = next_page
+        resp = youtube.playlistItems().list(**params).execute()
+        existing_items.extend(resp.get("items", []))
+        next_page = resp.get("nextPageToken")
+        if not next_page:
+            break
 
-    # 既存のアイテムを取得
-    existing = youtube.playlistItems().list(
-        part="id",
-        playlistId=playlist_id,
-        maxResults=50
-    ).execute()
+    # 今日の曲を先頭に追加
+    added = 0
+    for song in reversed(songs):  # 逆順で追加して先頭に
+        vid = song.get("youtube_video_id", "").strip()
+        if not vid:
+            continue
+        try:
+            youtube.playlistItems().insert(
+                part="snippet",
+                body={"snippet": {
+                    "playlistId": playlist_id,
+                    "resourceId": {
+                        "kind": "youtube#video",
+                        "videoId": vid
+                    },
+                    "position": 0
+                }}
+            ).execute()
+            added += 1
+        except Exception as e:
+            print(f"  ⚠️  追加失敗: {song['title']} - {e}")
 
-    # 全削除
-    for item in existing.get("items", []):
-        youtube.playlistItems().delete(id=item["id"]).execute()
+    print(f"  ✅ {added}曲追加")
 
-    # 新しい動画を追加
-    add_to_playlist(youtube, video_id, playlist_id)
+    # 40曲を超えた分を削除（古い順）
+    total = len(existing_items) + added
+    if total > max_songs:
+        delete_count = total - max_songs
+        # 既存アイテムの末尾から削除
+        to_delete = existing_items[-(delete_count):]
+        for item in to_delete:
+            try:
+                youtube.playlistItems().delete(id=item["id"]).execute()
+            except Exception as e:
+                print(f"  ⚠️  削除失敗: {e}")
+        print(f"  🗑  {delete_count}曲削除（4日前分）")
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--date",     required=True, help="対象日 (YYYY-MM-DD)")
-    parser.add_argument("--idx",      required=True, type=int)
-    parser.add_argument("--slot",     required=True, choices=["morning", "evening"])
-    parser.add_argument("--video",    required=True, help="動画ファイルパス")
+    parser.add_argument("--date",  required=True)
+    parser.add_argument("--slot",  required=True, choices=["morning", "evening"])
+    parser.add_argument("--video", required=True)
     args = parser.parse_args()
 
-    # 発掘データ読み込み
-    data_path = f"data/discovery_{args.date}.json"
-    with open(data_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    song = data["songs"][args.idx]
-    slot_label = "朝" if args.slot == "morning" else "夕"
-    print(f"📤 YouTube投稿開始: {song['artist']} - {song['title']} [{slot_label}枠]")
+    slot_cfg = SLOT_CONFIG[args.slot]
+    slot_label = "朝" if args.slot == "morning" else "深夜"
+    print(f"📤 YouTube投稿開始: {slot_cfg['title_prefix']} [{slot_label}枠]")
 
     youtube = get_youtube_client()
 
-    caption = build_caption(song, args.slot)
+    # プレイリストから現在の曲を取得（discoveryデータ不要）
+    playlist_id = os.environ.get(
+        "YT_PLAYLIST_TODAY" if args.slot == "morning" else "YT_PLAYLIST_YESTERDAY",
+        ""
+    )
+    items = []
+    next_page = None
+    while True:
+        params = dict(part="snippet", playlistId=playlist_id, maxResults=50)
+        if next_page:
+            params["pageToken"] = next_page
+        resp = youtube.playlistItems().list(**params).execute()
+        items.extend(resp.get("items", []))
+        next_page = resp.get("nextPageToken")
+        if not next_page:
+            break
+
+    songs = []
+    for item in items:
+        snippet = item["snippet"]
+        vid = snippet["resourceId"]["videoId"]
+        songs.append({
+            "artist": snippet.get("videoOwnerChannelTitle", "Unknown"),
+            "title": snippet["title"],
+            "youtube_video_id": vid,
+            "youtube_url": f"https://youtu.be/{vid}",
+        })
+
+    print(f"  📋 {len(songs)}曲取得")
+
+    # キャプション生成・動画アップロード
+    caption = build_caption(songs, args.slot, {})
     scheduled_time = get_scheduled_time(args.slot)
     print(f"📅 予約投稿時刻: {scheduled_time}")
 
     video_id = upload_video(youtube, args.video, caption, scheduled_time)
 
-    # SELECTEDプレイリストに追加
-    if args.slot == "morning":
-        playlist_id = os.environ["YT_PLAYLIST_SELECTED_A"]
-    else:
-        playlist_id = os.environ["YT_PLAYLIST_SELECTED_B"]
+    # Selectedプレイリスト更新
+    print("📋 Selectedプレイリスト更新中...")
+    update_selected_playlist(youtube, songs, args.slot)
 
-    add_to_playlist(youtube, video_id, playlist_id)
-
-    # 結果を保存
+    # 結果保存
+    os.makedirs("data", exist_ok=True)
     result = {
         "date": args.date,
         "slot": args.slot,
-        "song": song,
         "video_id": video_id,
         "scheduled_time": scheduled_time,
-        "playlist_id": playlist_id,
+        "song_count": len(songs),
     }
-
-    os.makedirs("data", exist_ok=True)
-    with open(f"data/upload_{args.date}_{args.slot}.json", "w", encoding="utf-8") as f:
+    with open(f"data/upload_{args.date}_{args.slot}.json", "w",
+              encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
 
     print(f"✅ 完了: https://youtu.be/{video_id}")
