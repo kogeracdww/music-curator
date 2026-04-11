@@ -41,7 +41,8 @@ def build_caption(songs: list, slot: str, config: dict) -> dict:
         datetime.timezone(datetime.timedelta(hours=9))
     ).strftime("%Y.%m.%d")
 
-    title = f"{slot_cfg['title_prefix']} | {today}"
+    emoji = "🌅" if slot == "morning" else "🌙"
+    title = f"{emoji} {slot_cfg['title_prefix']} | {today}"
 
     # 曲リスト
     song_list = "\n".join([
@@ -49,30 +50,40 @@ def build_caption(songs: list, slot: str, config: dict) -> dict:
         for i, s in enumerate(songs)
     ])
 
-    # ジャンルタグ
+    # プレイリストURL
+    playlist_id = os.environ.get(
+        "YT_PLAYLIST_TODAY" if slot == "morning" else "YT_PLAYLIST_YESTERDAY",
+        ""
+    )
+    playlist_url = f"https://www.youtube.com/playlist?list={playlist_id}"
+
+    # ジャンルタグ（スペース・括弧を除去・小文字化）
     genre_tags = " ".join([
-        f"#{g.replace(' ', '').replace('(', '').replace(')', '')}"
+        "#" + g.lower().replace(" ", "").replace("(", "").replace(")", "").replace("-", "")
         for g in slot_cfg["genres"]
     ])
 
-    app_url = os.environ.get("APP_URL", "yourapp.com")
+    app_url = "https://play.google.com/store/apps/dev?id=5374692864597792516"
 
-    description = f"""{slot_cfg['title_prefix']}
+    description = f"""{emoji} {slot_cfg['title_prefix']}
 {today}
 
+🎵 Tracklist
 {song_list}
 
-▶ YouTube Playlist → https://youtube.com/playlist?list={os.environ.get('YT_PLAYLIST_TODAY' if slot == 'morning' else 'YT_PLAYLIST_YESTERDAY', '')}
+▶ YouTube Playlist
+{playlist_url}
+
+#musicdiscovery {genre_tags}
 
 ━━━━━━━━━━━━
 🔗 {app_url}
-━━━━━━━━━━━━
 
-#musicdiscovery {genre_tags}
+We'll offer simple products that give you a little boost every day.
 """
 
-    tags = ["musicdiscovery", "playlist"] + [
-        g.replace(" ", "").replace("(", "").replace(")", "")
+    tags = ["musicdiscovery"] + [
+        g.lower().replace(" ", "").replace("(", "").replace(")", "").replace("-", "")
         for g in slot_cfg["genres"]
     ]
 
