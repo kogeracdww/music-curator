@@ -142,7 +142,7 @@ def render_frame(frame_idx: int, dancer_frames: list,
         words = title.split()
         mid = len(words) // 2
         lines = [" ".join(words[:mid]), " ".join(words[mid:])]
-        y = 60
+        y = 160
         for line in lines:
             bb = draw.textbbox((0, 0), line, font=font_title)
             tw = bb[2] - bb[0]
