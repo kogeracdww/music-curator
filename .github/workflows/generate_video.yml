@@ -6,11 +6,8 @@ on:
       date:
         description: '対象日 (YYYY-MM-DD)'
         required: true
-      idx:
-        description: '曲のインデックス (0始まり)'
-        required: true
       slot:
-        description: '投稿枠 (morning / evening)'
+        description: '投稿枠'
         required: true
         type: choice
         options:
@@ -30,7 +27,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install system dependencies (FFmpeg)
+      - name: Install FFmpeg and fonts
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-dejavu
@@ -47,11 +44,12 @@ jobs:
 
       - name: Generate video
         env:
-          APP_URL: ${{ secrets.APP_URL }}
+          APP_URL:               ${{ secrets.APP_URL }}
+          YT_PLAYLIST_TODAY:     ${{ secrets.YT_PLAYLIST_TODAY }}
+          YT_PLAYLIST_YESTERDAY: ${{ secrets.YT_PLAYLIST_YESTERDAY }}
         run: |
           python scripts/generate_video.py \
             --date ${{ github.event.inputs.date }} \
-            --idx  ${{ github.event.inputs.idx }} \
             --slot ${{ github.event.inputs.slot }}
 
       - name: Upload to YouTube
@@ -67,11 +65,10 @@ jobs:
           VIDEO=$(ls output/*.mp4 | head -1)
           python scripts/youtube_upload.py \
             --date  ${{ github.event.inputs.date }} \
-            --idx   ${{ github.event.inputs.idx }} \
             --slot  ${{ github.event.inputs.slot }} \
             --video $VIDEO
 
-      - name: Upload output video as artifact
+      - name: Upload video as artifact
         uses: actions/upload-artifact@v4
         with:
           name: video-${{ github.event.inputs.date }}-${{ github.event.inputs.slot }}
