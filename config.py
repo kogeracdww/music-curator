@@ -11,7 +11,7 @@ WEEKDAY_CONFIG = {
     1: {
         "label": "火曜日",
         "region": "東南アジア",
-        "countries": ["Indonesia", "Thailand", "Vietnam", "Philippines", "Malaysia", "Singapore", "Myanmar"],
+        "countries": ["Indonesia", "Thailand", "Vietnam", "Philippines", "Malaysia", "Singapore"],
         "bgm": "bgm_02.mp3",
         "dancer_prefix": "shortM_02",
     },
@@ -36,7 +36,7 @@ WEEKDAY_CONFIG = {
     4: {
         "label": "金曜日",
         "region": "西欧・北米",
-        "countries": ["France", "Germany", "Spain", "Italy", "Netherlands", "Sweden", "Norway", "Denmark", "United States", "Canada"],
+        "countries": ["France", "Germany", "Spain", "Italy", "Netherlands", "Sweden", "Norway", "United States", "Canada"],
         "bgm": "bgm_05.mp3",
         "dancer_prefix": "shortM_05",
     },
@@ -51,7 +51,7 @@ WEEKDAY_CONFIG = {
         "label": "日曜日",
         "region": "西欧・北米・東南アジア",
         "countries": [
-            "France", "Germany", "Spain", "Italy", "United States", "Canada",
+            "France", "Germany", "Spain", "United States", "Canada",
             "Indonesia", "Thailand", "Vietnam", "Philippines"
         ],
         "bgm": "bgm_07.mp3",
@@ -59,12 +59,39 @@ WEEKDAY_CONFIG = {
     },
 }
 
+# 時間帯別ジャンル設定
+SLOT_CONFIG = {
+    "morning": {
+        "label": "Morning Playlist",
+        "title_prefix": "Today's Morning Playlist",
+        "genres": [
+            "City Pop Revival",
+            "Bedroom Pop",
+            "K-Indie",
+            "Future Bass (Chill)",
+        ],
+        "description": "A little positive · Chill · No lyrics in your language",
+    },
+    "evening": {
+        "label": "Late Night Playlist",
+        "title_prefix": "Tonight's Late Night Playlist",
+        "genres": [
+            "Trip-Hop Revival",
+            "Neo Soul",
+            "Chillhop",
+            "Indie Folk (Non-English)",
+            "Sweet Soul",
+        ],
+        "description": "Chill Out · Deep · Late night work session",
+    },
+}
+
 # 発掘条件
 DISCOVERY_RULES = {
     "max_followers": 1000,
     "ideal_max_followers": 100,
-    "release_months": 3,       # リリースから3ヶ月以内
-    "songs_per_day": 10,       # 1日の候補数
+    "release_hours": 36,       # 36時間以内にアップされた曲
+    "songs_per_day": 10,
     "major_labels_excluded": True,
 }
 
