@@ -1,7 +1,8 @@
 """
 STEP B-1: discover.py
-Claude APIを使って今日のリージョンから10曲を発掘する
-→ 発掘後にYouTube TODAYプレイリストを更新する
+YouTube Data APIで36時間以内にアップされた実在の曲を検索・発掘する
+→ Claude APIは一言コメント生成のみに使用
+→ 発掘後にTodayプレイリストを更新する
 """
 
 import os
@@ -11,7 +12,7 @@ import anthropic
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import WEEKDAY_CONFIG, DISCOVERY_RULES
+from config import WEEKDAY_CONFIG, DISCOVERY_RULES, SLOT_CONFIG
 
 
 def get_today_config():
@@ -21,56 +22,122 @@ def get_today_config():
     return weekday, WEEKDAY_CONFIG[weekday]
 
 
-def discover_songs(weekday: int, config: dict) -> list:
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    countries_str = "、".join(config["countries"])
-    region = config["region"]
+def get_youtube_client():
+    """YouTube APIクライアントを取得"""
+    import json as json_mod
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+    from googleapiclient.discovery import build
+
+    client_secret = json_mod.loads(os.environ["YOUTUBE_CLIENT_SECRET"])
+    refresh_token = os.environ["YOUTUBE_REFRESH_TOKEN"]
+
+    creds = Credentials(
+        token=None,
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=client_secret["installed"]["client_id"],
+        client_secret=client_secret["installed"]["client_secret"],
+    )
+    creds.refresh(Request())
+    return build("youtube", "v3", credentials=creds)
+
+
+def search_new_songs(youtube, slot: str, region_countries: list) -> list:
+    """
+    YouTube Data APIで36時間以内にアップされた曲を検索
+    """
+    slot_cfg = SLOT_CONFIG[slot]
+    genres = slot_cfg["genres"]
+    hours = DISCOVERY_RULES["release_hours"]
     n = DISCOVERY_RULES["songs_per_day"]
-    max_followers = DISCOVERY_RULES["max_followers"]
-    months = DISCOVERY_RULES["release_months"]
+
+    published_after = (
+        datetime.datetime.now(datetime.timezone.utc)
+        - datetime.timedelta(hours=hours)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    found = []
+    seen_ids = set()
+
+    # ジャンルごとに検索
+    for genre in genres:
+        if len(found) >= n:
+            break
+
+        query = f"{genre} music original"
+        try:
+            response = youtube.search().list(
+                part="snippet",
+                q=query,
+                type="video",
+                publishedAfter=published_after,
+                videoCategoryId="10",  # Music
+                maxResults=5,
+                order="date",
+            ).execute()
+
+            for item in response.get("items", []):
+                if len(found) >= n:
+                    break
+
+                vid = item["id"]["videoId"]
+                if vid in seen_ids:
+                    continue
+                seen_ids.add(vid)
+
+                snippet = item["snippet"]
+                found.append({
+                    "artist": snippet["channelTitle"],
+                    "title": snippet["title"],
+                    "youtube_video_id": vid,
+                    "youtube_url": f"https://youtu.be/{vid}",
+                    "genre": genre,
+                    "country": "Unknown",
+                    "followers": "0",
+                    "comment_ja": "",
+                    "comment_en": "",
+                    "published_at": snippet["publishedAt"],
+                })
+
+        except Exception as e:
+            print(f"  ⚠️  検索失敗 ({genre}): {e}")
+
+    return found[:n]
+
+
+def generate_comments(songs: list, slot: str, weekday_config: dict) -> list:
+    """Claude APIで一言コメントを生成"""
+    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    slot_cfg = SLOT_CONFIG[slot]
+
+    songs_text = "\n".join([
+        f"{i+1}. {s['artist']} - {s['title']} (Genre: {s['genre']})"
+        for i, s in enumerate(songs)
+    ])
 
     prompt = f"""
-あなたは世界の無名音楽を発掘するキュレーターです。
+以下の楽曲リストに対して、それぞれ一言コメントを生成してください。
 
-今日のリージョン: {region}
-対象国: {countries_str}
+プレイリストの雰囲気: {slot_cfg['description']}
 
-以下の条件を満たすアーティストと楽曲を{n}件発掘してください。
-
-【発掘条件】
-- リリースから{months}ヶ月以内の新曲
-- フォロワー{max_followers}人未満（理想は100人以下）
-- メジャーレーベル非所属
-- インスト多め・歌あり・音楽性重視
-- YouTubeまたはSpotifyに存在する曲
+楽曲リスト:
+{songs_text}
 
 【出力形式】
 必ずJSON配列のみを返してください。他のテキストは一切不要です。
 
 [
   {{
-    "artist": "アーティスト名",
-    "title": "曲名",
-    "country": "国名（英語）",
-    "genre": "ジャンル（英語・簡潔に）",
-    "followers": "フォロワー数の概算（数字のみ）",
-    "youtube_search": "YouTubeで検索するためのキーワード",
-    "youtube_video_id": "YouTubeのVideo ID（わかれば）。不明な場合は空文字",
-    "spotify_search": "Spotifyで検索するためのキーワード",
-    "comment_ja": "この曲の魅力を伝える一言（日本語・40文字以内）",
-    "comment_en": "One-line comment in English (under 60 chars)",
-    "release_year": 2024,
-    "release_month": 11
+    "comment_ja": "この曲の魅力を伝える一言（日本語・30文字以内）",
+    "comment_en": "One-line comment in English (under 50 chars)"
   }}
 ]
-
-実在する可能性が高いアーティストを選んでください。
-架空のアーティストは避けてください。
 """
 
     message = client.messages.create(
         model="claude-sonnet-4-5",
-        max_tokens=3000,
+        max_tokens=2000,
         messages=[{"role": "user", "content": prompt}]
     )
 
@@ -80,140 +147,113 @@ def discover_songs(weekday: int, config: dict) -> list:
         if raw.startswith("json"):
             raw = raw[4:]
 
-    songs = json.loads(raw.strip())
+    comments = json.loads(raw.strip())
+
+    for i, song in enumerate(songs):
+        if i < len(comments):
+            song["comment_ja"] = comments[i].get("comment_ja", "")
+            song["comment_en"] = comments[i].get("comment_en", "")
+
     return songs
 
 
-def save_results(songs: list, weekday: int, config: dict) -> str:
+def save_results(songs: list, slot: str, weekday: int, config: dict) -> str:
     today = datetime.datetime.now(
         datetime.timezone(datetime.timedelta(hours=9))
     ).strftime("%Y-%m-%d")
 
     result = {
         "date": today,
+        "slot": slot,
         "weekday": weekday,
         "region": config["region"],
         "bgm": config["bgm"],
         "dancer_prefix": config["dancer_prefix"],
-        "songs": songs
+        "songs": songs,
     }
 
     os.makedirs("data", exist_ok=True)
-    path = f"data/discovery_{today}.json"
+    path = f"data/discovery_{today}_{slot}.json"
     with open(path, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
 
-    print(f"✅ 発掘完了: {len(songs)}曲 → {path}")
+    print(f"✅ 保存完了: {len(songs)}曲 → {path}")
     return path
 
 
-def search_youtube_video_id(youtube, artist: str, title: str) -> str:
-    """YouTube Data APIで曲を検索してVideo IDを取得"""
-    try:
-        query = f"{artist} {title}"
-        response = youtube.search().list(
-            part="snippet",
-            q=query,
-            type="video",
-            maxResults=1,
-            videoCategoryId="10"
-        ).execute()
-        items = response.get("items", [])
-        if items:
-            return items[0]["id"]["videoId"]
-        return ""
-    except Exception as e:
-        print(f"  ⚠️  YouTube検索失敗: {artist} - {title}: {e}")
-        return ""
-
-
-def update_today_playlist(songs: list):
-    """YouTube TODAYプレイリストを更新"""
-    client_secret_str = os.environ.get("YOUTUBE_CLIENT_SECRET", "")
-    refresh_token = os.environ.get("YOUTUBE_REFRESH_TOKEN", "")
-
-    if not client_secret_str or not refresh_token:
-        print("⚠️  YouTube認証情報がありません。スキップします。")
-        return
-
-    try:
-        from google.oauth2.credentials import Credentials
-        from google.auth.transport.requests import Request
-        from googleapiclient.discovery import build
-
-        client_secret = json.loads(client_secret_str)
-        creds = Credentials(
-            token=None,
-            refresh_token=refresh_token,
-            token_uri="https://oauth2.googleapis.com/token",
-            client_id=client_secret["installed"]["client_id"],
-            client_secret=client_secret["installed"]["client_secret"],
-        )
-        creds.refresh(Request())
-        youtube = build("youtube", "v3", credentials=creds)
-
+def update_today_playlist(youtube, songs: list, slot: str):
+    """Todayプレイリストを更新（既存削除→新規追加）"""
+    if slot == "morning":
         playlist_id = os.environ["YT_PLAYLIST_TODAY"]
+    else:
+        playlist_id = os.environ["YT_PLAYLIST_YESTERDAY"]
 
-        # 既存アイテムを全削除
+    # 既存アイテムを全削除
+    try:
         existing = youtube.playlistItems().list(
             part="id", playlistId=playlist_id, maxResults=50
         ).execute()
         for item in existing.get("items", []):
             youtube.playlistItems().delete(id=item["id"]).execute()
-        print("🗑  TODAYプレイリストをクリア")
-
-        # 各曲をYouTube検索してプレイリストに追加
-        added = 0
-        for song in songs:
-            vid = song.get("youtube_video_id", "").strip()
-            if not vid:
-                print(f"  🔍 YouTube検索中: {song['artist']} - {song['title']}")
-                vid = search_youtube_video_id(youtube, song["artist"], song["title"])
-                if vid:
-                    song["youtube_video_id"] = vid
-
-            if not vid:
-                print(f"  スキップ（Video IDなし）: {song['artist']} - {song['title']}")
-                continue
-
-            try:
-                youtube.playlistItems().insert(
-                    part="snippet",
-                    body={"snippet": {
-                        "playlistId": playlist_id,
-                        "resourceId": {"kind": "youtube#video", "videoId": vid}
-                    }}
-                ).execute()
-                print(f"  ✅ 追加: {song['artist']} - {song['title']} ({vid})")
-                added += 1
-            except Exception as e:
-                print(f"  ⚠️  追加失敗: {song['artist']} - {e}")
-
-        print(f"✅ TODAYプレイリスト更新完了: {added}曲追加")
-
+        print(f"🗑  プレイリストをクリア")
     except Exception as e:
-        print(f"⚠️  TODAYプレイリスト更新エラー: {e}")
-        print("   ※ 発掘・メール送信は続行します")
+        print(f"  ⚠️  クリア失敗: {e}")
+
+    # 新しい曲を追加
+    added = 0
+    for song in songs:
+        vid = song.get("youtube_video_id", "").strip()
+        if not vid:
+            continue
+        try:
+            youtube.playlistItems().insert(
+                part="snippet",
+                body={"snippet": {
+                    "playlistId": playlist_id,
+                    "resourceId": {
+                        "kind": "youtube#video",
+                        "videoId": vid
+                    }
+                }}
+            ).execute()
+            added += 1
+        except Exception as e:
+            print(f"  ⚠️  追加失敗: {song['title']} - {e}")
+
+    print(f"✅ プレイリスト更新完了: {added}曲追加")
 
 
 def main():
     weekday, config = get_today_config()
     print(f"📅 今日: {config['label']} / {config['region']}")
-    print(f"🎵 BGM: {config['bgm']}")
-    print(f"💃 ダンサー: {config['dancer_prefix']}_01〜08.png")
-    print("🔍 Claude APIで曲を発掘中...")
 
-    songs = discover_songs(weekday, config)
+    youtube = get_youtube_client()
 
-    for i, s in enumerate(songs, 1):
-        print(f"  {i:2d}. {s['artist']} - {s['title']} ({s['country']})")
+    for slot in ["morning", "evening"]:
+        slot_cfg = SLOT_CONFIG[slot]
+        print(f"\n{'🌅' if slot == 'morning' else '🌙'} {slot_cfg['title_prefix']}")
+        print(f"  ジャンル: {' / '.join(slot_cfg['genres'])}")
 
-    path = save_results(songs, weekday, config)
+        # YouTube APIで実在する曲を検索
+        print("  🔍 YouTube APIで曲を検索中...")
+        songs = search_new_songs(youtube, slot, config["countries"])
+        print(f"  📋 {len(songs)}曲取得")
 
-    print("📋 YouTube TODAYプレイリストを更新中...")
-    update_today_playlist(songs)
+        for i, s in enumerate(songs, 1):
+            print(f"    {i:2d}. {s['artist']} - {s['title']}")
 
-    return path
+        # Claude APIでコメント生成
+        print("  💬 コメント生成中...")
+        songs = generate_comments(songs, slot, config)
+
+        # 保存
+        save_results(songs, slot, weekday, config)
+
+        # Todayプレイリスト更新
+        print("  📋 プレイリスト更新中...")
+        update_today_playlist(youtube, songs, slot)
+
+    print("\n✅ 全処理完了")
 
 
 if __name__ == "__main__":
