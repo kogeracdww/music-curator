@@ -71,47 +71,6 @@ SLOT_CONFIG = {
             "Future Bass (Chill)",
         ],
         "description": "A little positive · Chill · No lyrics in your language",
-    },
-    "evening": {
-        "label": "Late Night Playlist",
-        "title_prefix": "Tonight's Late Night Playlist",
-        "genres": [
-            "Trip-Hop Revival",
-            "Neo Soul",
-            "Chillhop",
-            "Indie Folk (Non-English)",
-            "Sweet Soul",
-        ],
-        "description": "Chill Out · Deep · Late night work session",
-    },
-}
-
-# 発掘条件
-DISCOVERY_RULES = {
-    "max_followers": 1000,
-    "ideal_max_followers": 100,
-    "release_hours": 36,       # 36時間以内にアップされた曲
-    "songs_per_day": 10,
-    "major_labels_excluded": True,
-}
-
-# 投稿時刻 (JST)
-POST_TIMES = {
-    "morning": "08:00",
-    "evening": "19:00",
-}
-
-SLOT_CONFIG = {
-    "morning": {
-        "label": "Morning Playlist",
-        "title_prefix": "Today's Morning Playlist",
-        "genres": [
-            "City Pop Revival",
-            "Bedroom Pop",
-            "K-Indie",
-            "Future Bass (Chill)",
-        ],
-        "description": "A little positive · Chill · No lyrics in your language",
         "playlist_today": "Today's Morning Playlist",
         "playlist_selected": "Morning Playlist",
     },
@@ -136,4 +95,19 @@ PLAYLIST_RULES = {
     "keep_days": 4,        # 何日分をキープするか
     "songs_per_day": 10,   # 1日あたりの曲数
     # 4日分 × 10曲 = 最大40曲をキープ
+}
+
+# 発掘条件
+DISCOVERY_RULES = {
+    "max_followers": 1000,
+    "ideal_max_followers": 100,
+    "release_hours": 36,       # 36時間以内にアップされた曲
+    "songs_per_day": 10,
+    "major_labels_excluded": True,
+}
+
+# 投稿時刻 (JST)
+POST_TIMES = {
+    "morning": "08:00",
+    "evening": "19:00",
 }
