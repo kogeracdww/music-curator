@@ -44,9 +44,11 @@ jobs:
 
       - name: Generate video
         env:
-          APP_URL:               ${{ secrets.APP_URL }}
-          YT_PLAYLIST_TODAY:     ${{ secrets.YT_PLAYLIST_TODAY }}
-          YT_PLAYLIST_YESTERDAY: ${{ secrets.YT_PLAYLIST_YESTERDAY }}
+          APP_URL:                ${{ secrets.APP_URL }}
+          YT_PLAYLIST_TODAY:      ${{ secrets.YT_PLAYLIST_TODAY }}
+          YT_PLAYLIST_YESTERDAY:  ${{ secrets.YT_PLAYLIST_YESTERDAY }}
+          YOUTUBE_CLIENT_SECRET:  ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN:  ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
         run: |
           python scripts/generate_video.py \
             --date ${{ github.event.inputs.date }} \
