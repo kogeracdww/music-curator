@@ -100,3 +100,40 @@ POST_TIMES = {
     "morning": "08:00",
     "evening": "19:00",
 }
+
+SLOT_CONFIG = {
+    "morning": {
+        "label": "Morning Playlist",
+        "title_prefix": "Today's Morning Playlist",
+        "genres": [
+            "City Pop Revival",
+            "Bedroom Pop",
+            "K-Indie",
+            "Future Bass (Chill)",
+        ],
+        "description": "A little positive · Chill · No lyrics in your language",
+        "playlist_today": "Today's Morning Playlist",
+        "playlist_selected": "Morning Playlist",
+    },
+    "evening": {
+        "label": "Midnight Playlist",
+        "title_prefix": "Midnight playlist for tonight",
+        "genres": [
+            "Trip-Hop Revival",
+            "Neo Soul",
+            "Chillhop",
+            "Indie Folk (Non-English)",
+            "Sweet Soul",
+        ],
+        "description": "Chill Out · Deep · Late night work session",
+        "playlist_today": "Midnight playlist for tonight",
+        "playlist_selected": "Midnight playlist",
+    },
+}
+
+# プレイリスト管理設定
+PLAYLIST_RULES = {
+    "keep_days": 4,        # 何日分をキープするか
+    "songs_per_day": 10,   # 1日あたりの曲数
+    # 4日分 × 10曲 = 最大40曲をキープ
+}
