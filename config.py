@@ -73,6 +73,8 @@ SLOT_CONFIG = {
         "description": "A little positive · Chill · No lyrics in your language",
         "playlist_today": "Today's Morning Playlist",
         "playlist_selected": "Morning Playlist",
+        "dancer_prefix": "shortM_01",
+        "bgm": "bgm_01.mp3",
     },
     "evening": {
         "label": "Midnight Playlist",
@@ -87,6 +89,8 @@ SLOT_CONFIG = {
         "description": "Chill Out · Deep · Late night work session",
         "playlist_today": "Midnight playlist for tonight",
         "playlist_selected": "Midnight playlist",
+        "dancer_prefix": "shortM_02",
+        "bgm": "bgm_02.mp3",
     },
 }
 
