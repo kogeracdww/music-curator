@@ -88,196 +88,65 @@ def wrap_text(text: str, font, max_width: int, draw) -> list:
     return lines
 
 
-def render_frame(frame_idx: int, dancer_frames: list,
-                 data: dict, slot: str) -> Image.Image:
-    """1フレームをレンダリング"""
-    slot_cfg = SLOT_CONFIG[slot]
-    songs = data["songs"]
+def get_songs_from_playlist(slot: str) -> list:
+    """
+    TODAYプレイリストから現在の曲を取得
+    （手動削除後の曲リストを反映）
+    """
+    import json as json_mod
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+    from googleapiclient.discovery import build
 
-    # ベース画像（ダンサーコマ送り）
-    d_idx = (frame_idx // DANCER_INTERVAL) % len(dancer_frames)
-    frame = dancer_frames[d_idx].copy().convert("RGBA")
+    client_secret = json_mod.loads(os.environ["YOUTUBE_CLIENT_SECRET"])
+    refresh_token = os.environ["YOUTUBE_REFRESH_TOKEN"]
 
-    # テキストレイヤー
-    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(layer)
+    creds = Credentials(
+        token=None,
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=client_secret["installed"]["client_id"],
+        client_secret=client_secret["installed"]["client_secret"],
+    )
+    creds.refresh(Request())
+    youtube = build("youtube", "v3", credentials=creds)
 
-    def fa(start, dur=20):
-        return int(255 * min(1.0, max(0.0, (frame_idx - start) / dur)))
+    playlist_id = os.environ.get(
+        "YT_PLAYLIST_TODAY" if slot == "morning" else "YT_PLAYLIST_YESTERDAY"
+    )
 
-    # ── ゾーンA: プレイリストタイトル＋ジャンル（上部グレー）──
-    a = fa(0)
-    if a:
-        # タイトル（大）
-        title = slot_cfg["title_prefix"]
-        font_title = gf(88, bold=True)
-
-        # 2行に分割
-        words = title.split()
-        mid = len(words) // 2
-        line1 = " ".join(words[:mid])
-        line2 = " ".join(words[mid:])
-
-        y = 60
-        for line in [line1, line2]:
-            bb = draw.textbbox((0, 0), line, font=font_title)
-            tw = bb[2] - bb[0]
-            x = max(50, (W - tw) // 2)
-            draw.text((x, y), line, font=font_title,
-                      fill=(*WHITE_TEXT, a))
-            y += 105
-
-        # ジャンル表示
-        a2 = fa(10)
-        if a2:
-            genre_text = " / ".join(slot_cfg["genres"])
-            font_genre = gf(34)
-            # 長い場合は折り返し
-            bb = draw.textbbox((0, 0), genre_text, font=font_genre)
-            tw = bb[2] - bb[0]
-            if tw > W - 100:
-                # 2行に分割
-                genres = slot_cfg["genres"]
-                half = len(genres) // 2
-                g1 = " / ".join(genres[:half])
-                g2 = " / ".join(genres[half:])
-                for gi, gl in enumerate([g1, g2]):
-                    bb2 = draw.textbbox((0, 0), gl, font=font_genre)
-                    tw2 = bb2[2] - bb2[0]
-                    x2 = max(50, (W - tw2) // 2)
-                    draw.text((x2, y + gi * 48), gl,
-                              font=font_genre,
-                              fill=(*WHITE_TEXT, int(a2 * 0.85)))
-            else:
-                x2 = max(50, (W - tw) // 2)
-                draw.text((x2, y + 10), genre_text,
-                          font=font_genre,
-                          fill=(*WHITE_TEXT, int(a2 * 0.85)))
-
-    # ── ゾーンB: 10曲リスト（クリーム中段・左側）──
-    a = fa(15)
-    if a:
-        font_song = gf(36, bold=False)
-        font_num  = gf(36, bold=True)
-
-        list_x = 55
-        list_y = ZONE_A_END + 50
-        line_h = 68  # 1曲あたりの高さ
-
-        for i, song in enumerate(songs[:10]):
-            y_pos = list_y + i * line_h
-            num_text = f"{i+1:02d}."
-
-            # 番号
-            draw.text((list_x, y_pos), num_text,
-                      font=font_num, fill=(*DARK_TEXT, a))
-
-            # アーティスト - 曲名（長い場合は省略）
-            song_text = f"{song['artist']} - {song['title']}"
-            max_w = 560  # ダンサーと重ならない幅
-            bb = draw.textbbox((0, 0), song_text, font=font_song)
-            while bb[2] - bb[0] > max_w and len(song_text) > 10:
-                song_text = song_text[:-4] + "..."
-                bb = draw.textbbox((0, 0), song_text, font=font_song)
-
-            draw.text((list_x + 75, y_pos), song_text,
-                      font=font_song, fill=(*DARK_TEXT, a))
-
-    # ── ゾーンC: リンク＋タグ（下部グレー）──
-    a = fa(25)
-    if a:
-        ix = 55
-        y = ZONE_B_END + 55
-
-        # YouTubeリンク
-        font_link = gf(36)
-        playlist_id = os.environ.get(
-            "YT_PLAYLIST_TODAY" if slot == "morning" else "YT_PLAYLIST_YESTERDAY",
-            ""
+    items = []
+    next_page = None
+    while True:
+        params = dict(
+            part="snippet",
+            playlistId=playlist_id,
+            maxResults=50
         )
-        link_text = f"▶ YouTube → youtu.be/playlist"
-        draw.text((ix, y), link_text, font=font_link,
-                  fill=(*DARK_TEXT, a))
-        y += 65
+        if next_page:
+            params["pageToken"] = next_page
+        resp = youtube.playlistItems().list(**params).execute()
+        items.extend(resp.get("items", []))
+        next_page = resp.get("nextPageToken")
+        if not next_page:
+            break
 
-        # ハッシュタグ
-        a2 = fa(32)
-        if a2:
-            font_tag = gf(30)
-            base_tags = "#musicdiscovery"
-            genre_tags = " ".join([
-                f"#{g.replace(' ', '').replace('(', '').replace(')', '')}"
-                for g in slot_cfg["genres"]
-            ])
+    songs = []
+    for item in items:
+        snippet = item["snippet"]
+        vid = snippet["resourceId"]["videoId"]
+        songs.append({
+            "artist": snippet["videoOwnerChannelTitle"],
+            "title": snippet["title"],
+            "youtube_video_id": vid,
+            "youtube_url": f"https://youtu.be/{vid}",
+            "comment_ja": "",
+            "comment_en": "",
+            "genre": "",
+        })
 
-            for tag_line in [base_tags, genre_tags]:
-                draw.text((ix, y), tag_line, font=font_tag,
-                          fill=(*MID_TEXT, int(a2 * 0.9)))
-                y += 48
-
-    frame.alpha_composite(layer)
-    return frame.convert("RGB")
-
-
-def generate_video(data: dict, slot: str, output_path: str):
-    """動画を生成"""
-    dancer_prefix = data["dancer_prefix"]
-    bgm_file = data["bgm"]
-
-    frames_dir = output_path.replace(".mp4", "_frames")
-    os.makedirs(frames_dir, exist_ok=True)
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-    print(f"💃 ダンサー読み込み: {dancer_prefix}")
-    dancer_frames = load_dancer_frames(dancer_prefix)
-
-    total = FPS * DURATION
-    print(f"🎬 フレーム生成: {total}枚")
-
-    for i in range(total):
-        if i % (FPS * 5) == 0:
-            print(f"  {i}/{total} ({i * 100 // total}%)")
-        frame = render_frame(i, dancer_frames, data, slot)
-        frame.save(os.path.join(frames_dir, f"f_{i:05d}.png"))
-
-    bgm_path = os.path.join(ASSETS_DIR, "bgm", bgm_file)
-    print(f"🎵 BGM合成: {bgm_file}")
-
-    if os.path.exists(bgm_path):
-        cmd = [
-            "ffmpeg", "-y",
-            "-framerate", str(FPS),
-            "-i", os.path.join(frames_dir, "f_%05d.png"),
-            "-i", bgm_path,
-            "-c:v", "libx264",
-            "-c:a", "aac",
-            "-pix_fmt", "yuv420p",
-            "-crf", "20",
-            "-preset", "fast",
-            "-shortest",
-            output_path
-        ]
-    else:
-        print("  ⚠️  BGMなし・無音で生成")
-        cmd = [
-            "ffmpeg", "-y",
-            "-framerate", str(FPS),
-            "-i", os.path.join(frames_dir, "f_%05d.png"),
-            "-c:v", "libx264",
-            "-pix_fmt", "yuv420p",
-            "-crf", "20",
-            "-preset", "fast",
-            output_path
-        ]
-
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    shutil.rmtree(frames_dir)
-
-    if result.returncode != 0:
-        raise RuntimeError(f"FFmpegエラー: {result.stderr[-500:]}")
-
-    print(f"✅ 動画生成完了: {output_path}")
-    return output_path
+    print(f"  📋 プレイリストから{len(songs)}曲取得")
+    return songs
 
 
 def main():
