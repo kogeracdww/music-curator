@@ -209,12 +209,11 @@ def render_frame(frame_idx: int, dancer_frames: list,
                       font=font_tag, fill=(*MID_TEXT, int(a2 * 0.9)))
             y += 48
 
-            genre_tags = " ".join([
-                f"#{g.replace(' ', '').replace('(', '').replace(')', '')}"
-                for g in slot_cfg["genres"]
-            ])
-            draw.text((ix, y), genre_tags,
-                      font=font_tag, fill=(*MID_TEXT, int(a2 * 0.9)))
+            for genre in slot_cfg["genres"]:
+                tag = "#" + genre.replace(" ", "").replace("(", "").replace(")", "").replace("-", "").lower()
+                draw.text((ix, y), tag,
+                          font=font_tag, fill=(*MID_TEXT, int(a2 * 0.9)))
+                y += 44
 
     frame.alpha_composite(layer)
     return frame.convert("RGB")
