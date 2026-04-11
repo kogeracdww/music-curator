@@ -156,13 +156,32 @@ def main():
                         choices=["morning", "evening"])
     args = parser.parse_args()
 
-    path = os.path.join(DATA_DIR, f"discovery_{args.date}_{args.slot}.json")
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
     slot_cfg = SLOT_CONFIG[args.slot]
     slot_label = "朝" if args.slot == "morning" else "深夜"
     print(f"🎬 動画生成: {slot_cfg['title_prefix']} [{slot_label}枠]")
+
+    # TODAYプレイリストから現在の曲を取得（手動削除後を反映）
+    print("📋 TODAYプレイリストから曲を取得中...")
+    songs = get_songs_from_playlist(args.slot)
+
+    if not songs:
+        print("⚠️  プレイリストに曲がありません。終了します。")
+        return
+
+    # discoveryデータを読み込んでdancer/bgm情報を取得
+    path = os.path.join(DATA_DIR, f"discovery_{args.date}_{args.slot}.json")
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        data["songs"] = songs  # プレイリストの現在の曲で上書き
+    else:
+        # データがない場合はslot設定から取得
+        data = {
+            "songs": songs,
+            "dancer_prefix": slot_cfg["dancer_prefix"],
+            "bgm": slot_cfg["bgm"],
+            "region": "",
+        }
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     output_path = os.path.join(
@@ -170,7 +189,12 @@ def main():
         f"{args.date}_{args.slot}.mp4"
     )
 
-    generate_video(data, args.slot, output_path)
+ def generate_video(data: dict, slot: str, output_path: str):
+    """動画を生成"""
+    slot_cfg = SLOT_CONFIG[slot]
+    # slot設定から固定素材を使用
+    dancer_prefix = slot_cfg["dancer_prefix"]
+    bgm_file = slot_cfg["bgm"]
 
 
 if __name__ == "__main__":
