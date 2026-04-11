@@ -6,6 +6,7 @@ STEP D-2: youtube_upload.py
 """
 
 import os
+import sys
 import json
 import datetime
 import argparse
