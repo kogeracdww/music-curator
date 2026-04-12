@@ -370,7 +370,19 @@ def main():
         update_today_playlist(youtube, songs, slot)
 
         all_data[slot] = songs
+# X候補データ生成（検索リンク方式・API不要）
+    today = datetime.datetime.now(
+        datetime.timezone(datetime.timedelta(hours=9))
+    ).strftime("%Y-%m-%d")
 
+    x_data = {
+        "date": today,
+        "weekday": weekday,
+        "group": INSTRUMENT_GROUPS[weekday]["label"],
+        "candidates": [],
+    }
+    with open(f"data/x_candidates_{today}.json", "w", encoding="utf-8") as f:
+        json.dump(x_data, f, ensure_ascii=False, indent=2)
 
     print("\n✅ 全処理完了")
 
