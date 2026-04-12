@@ -1,6 +1,6 @@
 """
 STEP C-1: send_email.py
-発掘した曲をメールで送信する（朝・夜の2通）
+YouTube発掘リスト（朝・夜）＋X候補リストを1通のメールで送信
 """
 
 import os
@@ -11,88 +11,205 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 
+# X投稿用絵文字パターン
+X_EMOJIS = {
+    "beginner": ["🌱✨", "🎹💫", "🎸🌟", "🎻🌱", "🥁✨"],
+    "advanced": ["🔥✨", "🎵👏", "🎶💎", "🎼🌟", "✨🎵"],
+    "unique":   ["🎼🔮", "✨🎵", "🎶🌀", "🎸💫", "🎹🔮"],
+}
+
+
 def load_discovery(date: str, slot: str) -> dict:
-    """発掘結果を読み込む"""
     path = f"data/discovery_{date}_{slot}.json"
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def build_html(data: dict, slot: str) -> str:
-    """メールHTMLを構築"""
+def load_x_candidates(date: str) -> dict:
+    path = f"data/x_candidates_{date}.json"
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
+
+
+def build_youtube_section(data: dict, slot: str) -> str:
+    """YouTube発掘リストのHTMLセクションを生成"""
     songs = data["songs"]
-    date = data["date"]
-    region = data["region"]
-    slot_label = "🌅 朝枠" if slot == "morning" else "🌙 深夜枠"
-    title = "Today's Morning Playlist" if slot == "morning" else "Midnight playlist for tonight"
+    slot_emoji = "☕️✨" if slot == "morning" else "🌙"
+    title = "Today's Morning Playlist" if slot == "morning" \
+        else "Midnight playlist for tonight"
 
     rows = ""
     for i, s in enumerate(songs):
         rows += f"""
         <tr style="border-bottom:1px solid #eee;">
           <td style="padding:10px 8px; font-size:13px; color:#333;">
-            <strong>{i+1:02d}.</strong> {s['artist']}<br>
-            <span style="color:#666;">「{s['title']}」</span><br>
-            <span style="font-size:11px; color:#999;">
-              {s.get('genre', '')}
-            </span><br>
+            <strong>{i+1:02d}.</strong>
+            <strong>{s['artist']}</strong><br>
+            <span style="color:#555;">「{s['title']}」</span><br>
+            <span style="font-size:11px; color:#999;">{s.get('genre', '')}</span><br>
             <span style="font-size:12px; color:#444; margin-top:4px; display:block;">
               🇯🇵 {s.get('comment_ja', '')}<br>
               🇺🇸 {s.get('comment_en', '')}
             </span>
-            <span style="font-size:11px; color:#4a90d9; margin-top:4px; display:block;">
-              ▶ <a href="{s.get('youtube_url', '')}">YouTube</a>
+            <span style="font-size:11px; margin-top:4px; display:block;">
+              ▶ <a href="{s.get('youtube_url', '')}" style="color:#4a90d9;">YouTube</a>
             </span>
           </td>
         </tr>
         """
 
-    html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head><meta charset="utf-8"></head>
-    <body style="font-family: -apple-system, sans-serif; max-width:600px; margin:0 auto; padding:20px;">
-
-      <div style="background:#1a1a2e; color:#fff; padding:20px; border-radius:12px; margin-bottom:20px;">
-        <h1 style="margin:0; font-size:20px;">{slot_label} {title}</h1>
-        <p style="margin:8px 0 0; color:#aaa; font-size:13px;">
-          {date} · {region} · {len(songs)}曲
+    return f"""
+    <div style="margin-bottom:24px;">
+      <div style="background:#1a1a2e; color:#fff; padding:16px 20px;
+                  border-radius:10px 10px 0 0;">
+        <h2 style="margin:0; font-size:17px;">{slot_emoji} {title}</h2>
+        <p style="margin:4px 0 0; color:#aaa; font-size:12px;">
+          {data['region']} · {len(songs)}曲
         </p>
       </div>
+      <table style="width:100%; border-collapse:collapse;
+                    border:1px solid #ddd; border-top:none;">
+        {rows}
+      </table>
+    </div>
+    """
 
-      <p style="color:#555; font-size:13px;">
-        TODAYプレイリストで流し聴きして、<br>
-        GitHubのActionsから動画生成を実行してください。<br>
-        <strong>Actions → Generate and Upload Video → Run workflow</strong><br>
-        date: {date} / slot: {slot}
-      </p>
 
-      <table style="width:100%; border-collapse:collapse;">
+def build_x_section(x_data: dict) -> str:
+    """X候補リストのHTMLセクションを生成"""
+    if not x_data:
+        return ""
+
+    candidates = x_data.get("candidates", [])
+    group = x_data.get("group", "")
+    rows = ""
+
+    import random
+    emoji_pool = (
+        X_EMOJIS["beginner"] +
+        X_EMOJIS["advanced"] +
+        X_EMOJIS["unique"]
+    )
+
+    for i, c in enumerate(candidates):
+        emoji = emoji_pool[i % len(emoji_pool)]
+        rows += f"""
+        <tr style="border-bottom:1px solid #eee;">
+          <td style="padding:10px 8px; font-size:13px; color:#333;">
+            <strong>{i+1:02d}.</strong>
+            【{c['instrument']}】
+            <strong>{c['channel']}</strong><br>
+            <span style="color:#555; font-size:12px;">
+              {c['title'][:50]}{'...' if len(c['title']) > 50 else ''}
+            </span><br>
+            <span style="font-size:11px; margin-top:4px; display:block;">
+              ▶ <a href="{c['url']}" style="color:#4a90d9;">{c['url']}</a>
+            </span>
+          </td>
+          <td style="padding:10px 8px; text-align:center;
+                     font-size:22px; white-space:nowrap; width:80px;">
+            {emoji}
+          </td>
+        </tr>
+        """
+
+    return f"""
+    <div style="margin-bottom:24px;">
+      <div style="background:#1da1f2; color:#fff; padding:16px 20px;
+                  border-radius:10px 10px 0 0;">
+        <h2 style="margin:0; font-size:17px;">
+          𝕏 リポスト候補 · {group}
+        </h2>
+        <p style="margin:4px 0 0; color:#e0f0ff; font-size:12px;">
+          気に入った演奏を絵文字と一緒にリポストしてください
+        </p>
+      </div>
+      <table style="width:100%; border-collapse:collapse;
+                    border:1px solid #ddd; border-top:none;">
         <thead>
-          <tr style="background:#f5f5f5;">
-            <th style="padding:10px 8px; text-align:left; font-size:12px; color:#666;">曲情報</th>
+          <tr style="background:#f0f8ff;">
+            <th style="padding:8px; text-align:left;
+                       font-size:12px; color:#666;">演奏動画</th>
+            <th style="padding:8px; text-align:center;
+                       font-size:12px; color:#666;">絵文字</th>
           </tr>
         </thead>
         <tbody>
           {rows}
         </tbody>
       </table>
+      <div style="padding:10px 12px; background:#f0f8ff;
+                  border:1px solid #ddd; border-top:none;
+                  font-size:12px; color:#666;">
+        ※ 絵文字はそのままリポストのコメントにお使いください
+      </div>
+    </div>
+    """
 
-      <div style="margin-top:20px; padding:14px; background:#f9f9f9; border-radius:8px;">
-        <p style="margin:0; font-size:12px; color:#666;">
-          📋 TODAYプレイリストは自動更新済みです<br>
-          ▶ <a href="https://github.com/kogeracdww/music-curator/actions">GitHub Actions を開く</a>
-        </p>
+
+def build_full_email(date: str, morning_data: dict,
+                     evening_data: dict, x_data: dict) -> str:
+    """メール全体のHTMLを生成"""
+
+    youtube_morning = build_youtube_section(morning_data, "morning") \
+        if morning_data else ""
+    youtube_evening = build_youtube_section(evening_data, "evening") \
+        if evening_data else ""
+    x_section = build_x_section(x_data)
+
+    github_url = "https://github.com/kogeracdww/music-curator/actions"
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="utf-8"></head>
+    <body style="font-family:-apple-system,sans-serif;
+                 max-width:640px; margin:0 auto; padding:20px;">
+
+      <!-- ヘッダー -->
+      <div style="background:#111; color:#fff; padding:20px;
+                  border-radius:12px; margin-bottom:24px;">
+        <h1 style="margin:0; font-size:20px;">🎵 Daily Music Report</h1>
+        <p style="margin:6px 0 0; color:#aaa; font-size:13px;">{date}</p>
+      </div>
+
+      <!-- 操作ガイド -->
+      <div style="background:#f9f9f9; border:1px solid #ddd;
+                  border-radius:8px; padding:14px; margin-bottom:24px;
+                  font-size:13px; color:#555;">
+        <strong>📋 今日のタスク</strong><br>
+        1️⃣ YouTube：プレイリストで流し聴き → 不要な曲を削除<br>
+        2️⃣ YouTube：
+        <a href="{github_url}" style="color:#4a90d9;">GitHub Actions</a>
+        で朝・夜それぞれ動画生成を実行<br>
+        3️⃣ X：気に入った演奏動画を絵文字付きでリポスト
+      </div>
+
+      <!-- YouTube朝枠 -->
+      {youtube_morning}
+
+      <!-- YouTube夜枠 -->
+      {youtube_evening}
+
+      <!-- X候補 -->
+      {x_section}
+
+      <!-- フッター -->
+      <div style="margin-top:24px; padding:14px;
+                  border-top:1px solid #eee;
+                  font-size:11px; color:#999; text-align:center;">
+        Underground Radar · Daily Music Discovery
       </div>
 
     </body>
     </html>
     """
-    return html
 
 
 def send_email(html: str, subject: str):
-    """Gmailでメール送信"""
     gmail_user = os.environ["GMAIL_USER"]
     gmail_pass = os.environ["GMAIL_APP_PASSWORD"]
 
@@ -115,21 +232,28 @@ def main():
         datetime.timezone(datetime.timedelta(hours=9))
     ).strftime("%Y-%m-%d")
 
-    for slot in ["morning", "evening"]:
-        try:
-            data = load_discovery(today, slot)
-            slot_label = "朝枠" if slot == "morning" else "深夜枠"
-            title = "Today's Morning Playlist" if slot == "morning" \
-                else "Midnight playlist for tonight"
+    # データ読み込み
+    morning_data = None
+    evening_data = None
 
-            html = build_html(data, slot)
-            subject = f"🎵 [{today}] {slot_label} · {title}"
-            send_email(html, subject)
+    try:
+        morning_data = load_discovery(today, "morning")
+    except FileNotFoundError:
+        print("⚠️  朝枠データなし")
 
-        except FileNotFoundError:
-            print(f"⚠️  {slot}のデータが見つかりません。スキップします。")
-        except Exception as e:
-            print(f"⚠️  {slot}のメール送信失敗: {e}")
+    try:
+        evening_data = load_discovery(today, "evening")
+    except FileNotFoundError:
+        print("⚠️  夜枠データなし")
+
+    x_data = load_x_candidates(today)
+    if not x_data:
+        print("⚠️  X候補データなし")
+
+    # メール生成・送信
+    html = build_full_email(today, morning_data, evening_data, x_data)
+    subject = f"🎵 [{today}] Daily Music Report · YouTube + 𝕏"
+    send_email(html, subject)
 
 
 if __name__ == "__main__":
