@@ -79,34 +79,44 @@ def build_youtube_section(data: dict, slot: str) -> str:
 
 
 def build_x_section(x_data: dict) -> str:
-    """X候補リストのHTMLセクションを生成"""
+    """X候補リストのHTMLセクションを生成（検索リンク方式）"""
     if not x_data:
         return ""
 
-    candidates = x_data.get("candidates", [])
     group = x_data.get("group", "")
-    rows = ""
+    weekday = x_data.get("weekday", 0)
+    instruments = INSTRUMENT_GROUPS[weekday]["instruments"]
 
-    import random
+    rows = ""
     emoji_pool = (
         X_EMOJIS["beginner"] +
         X_EMOJIS["advanced"] +
         X_EMOJIS["unique"]
     )
 
-    for i, c in enumerate(candidates):
+    for i, instrument in enumerate(instruments):
         emoji = emoji_pool[i % len(emoji_pool)]
+
+        # X検索URL（動画・新着・6日以内に絞る）
+        query = instrument.replace(" ", "%20")
+        search_url = (
+            f"https://twitter.com/search?"
+            f"q={query}%20filter%3Avideos"
+            f"&f=live&src=typed_query"
+        )
+
         rows += f"""
         <tr style="border-bottom:1px solid #eee;">
           <td style="padding:10px 8px; font-size:13px; color:#333;">
             <strong>{i+1:02d}.</strong>
-            【{c['instrument']}】
-            <strong>{c['channel']}</strong><br>
-            <span style="color:#555; font-size:12px;">
-              {c['title'][:50]}{'...' if len(c['title']) > 50 else ''}
-            </span><br>
-            <span style="font-size:11px; margin-top:4px; display:block;">
-              ▶ <a href="{c['url']}" style="color:#4a90d9;">{c['url']}</a>
+            【{instrument}】<br>
+            <span style="font-size:12px; margin-top:4px; display:block;">
+              🔍 <a href="{search_url}" style="color:#1da1f2;">
+                Xで「{instrument}」の演奏動画を検索
+              </a>
+            </span>
+            <span style="font-size:11px; color:#999;">
+              ※ 新着順・動画のみで表示されます
             </span>
           </td>
           <td style="padding:10px 8px; text-align:center;
@@ -124,7 +134,7 @@ def build_x_section(x_data: dict) -> str:
           𝕏 リポスト候補 · {group}
         </h2>
         <p style="margin:4px 0 0; color:#e0f0ff; font-size:12px;">
-          気に入った演奏を絵文字と一緒にリポストしてください
+          リンクをクリック → 気に入った演奏動画を絵文字付きでリポスト
         </p>
       </div>
       <table style="width:100%; border-collapse:collapse;
@@ -132,7 +142,7 @@ def build_x_section(x_data: dict) -> str:
         <thead>
           <tr style="background:#f0f8ff;">
             <th style="padding:8px; text-align:left;
-                       font-size:12px; color:#666;">演奏動画</th>
+                       font-size:12px; color:#666;">楽器・検索リンク</th>
             <th style="padding:8px; text-align:center;
                        font-size:12px; color:#666;">絵文字</th>
           </tr>
@@ -144,11 +154,11 @@ def build_x_section(x_data: dict) -> str:
       <div style="padding:10px 12px; background:#f0f8ff;
                   border:1px solid #ddd; border-top:none;
                   font-size:12px; color:#666;">
-        ※ 絵文字はそのままリポストのコメントにお使いください
+        ※ 絵文字はそのままリポストのコメントにお使いください<br>
+        ※ 新着順で表示されるので6日以内の投稿が上に来ます
       </div>
     </div>
     """
-
 
 def build_full_email(date: str, morning_data: dict,
                      evening_data: dict, x_data: dict) -> str:
