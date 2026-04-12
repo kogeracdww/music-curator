@@ -371,23 +371,6 @@ def main():
 
         all_data[slot] = songs
 
-    # X候補リストアップ
-    print(f"\n🐦 X候補リストアップ中 ({INSTRUMENT_GROUPS[weekday]['label']})...")
-    x_candidates = search_x_candidates(youtube, weekday, n=10)
-
-    # X候補をJSONで保存
-    today = datetime.datetime.now(
-        datetime.timezone(datetime.timedelta(hours=9))
-    ).strftime("%Y-%m-%d")
-
-    x_data = {
-        "date": today,
-        "weekday": weekday,
-        "group": INSTRUMENT_GROUPS[weekday]["label"],
-        "candidates": x_candidates,
-    }
-    with open(f"data/x_candidates_{today}.json", "w", encoding="utf-8") as f:
-        json.dump(x_data, f, ensure_ascii=False, indent=2)
 
     print("\n✅ 全処理完了")
 
