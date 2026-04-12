@@ -10,6 +10,65 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+# 曜日別楽器グループ
+INSTRUMENT_GROUPS = {
+    0: {  # 月
+        "label": "Group A",
+        "instruments": [
+            "Vibraphone", "Contrabass", "Balalaika", "Clarinet",
+            "Bassoon", "Didgeridoo", "Taiko", "OP-1 synthesizer",
+            "Cymbals", "Musical Saw"
+        ]
+    },
+    1: {  # 火
+        "label": "Group B",
+        "instruments": [
+            "Tambourine", "Handpan", "Snare Drum", "Viola",
+            "Sitar", "Sarod", "Harmonica", "French Horn",
+            "Harmonium", "Angklung"
+        ]
+    },
+    2: {  # 水
+        "label": "Group C",
+        "instruments": [
+            "Marimba", "Piano", "Harp", "Ocarina",
+            "Pipe Organ", "Kalimba", "Celesta", "Mridangam",
+            "Tongue Drum", "Roland TB-303"
+        ]
+    },
+    3: {  # 木
+        "label": "Group D",
+        "instruments": [
+            "Guitar", "Mandolin", "Flute", "Trombone",
+            "Shakuhachi", "Tabla", "Balafon", "Timpani",
+            "Xylophone", "Djembe"
+        ]
+    },
+    4: {  # 金
+        "label": "Group E",
+        "instruments": [
+            "Violin", "Koto", "Gayageum", "Charango",
+            "Recorder", "Alphorn", "Kalimba", "Conga",
+            "Akai MPC", "Theremin"
+        ]
+    },
+    5: {  # 土
+        "label": "Group F",
+        "instruments": [
+            "Cello", "Shamisen", "Saxophone", "Oboe",
+            "Steelpan", "Bongo drum", "Bodhran", "Guitarron",
+            "Roland TR-808", "Theremin"
+        ]
+    },
+    6: {  # 日
+        "label": "Group G",
+        "instruments": [
+            "Handpan", "Ukulele", "Erhu", "Oud",
+            "Trumpet", "Tuba", "Djembe", "Glockenspiel",
+            "Mellotron", "Biwa"
+        ]
+    },
+}
 
 # X投稿用絵文字パターン
 X_EMOJIS = {
