@@ -234,25 +234,114 @@ def fetch_rss(url: str, source_name: str) -> list:
         print(f"  ⚠️ {source_name}失敗: {e}")
     return songs
 
+def fetch_koreanindie() -> list:
+    """Korean IndieサイトをスクレイピングしてK-indie曲を収集"""
+    songs = []
+    try:
+        resp = requests.get(
+            "https://www.koreanindie.com/",
+            timeout=15,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        resp.raise_for_status()
+
+        # h2タグからタイトルを抽出（「Artist : Title」形式）
+        import re
+        titles = re.findall(
+            r'<h2[^>]*>\s*<a[^>]*>([^<]+)</a>\s*</h2>',
+            resp.text
+        )
+
+        for raw in titles:
+            raw = raw.strip()
+            if " : " in raw:
+                parts = raw.split(" : ", 1)
+                artist = parts[0].strip()
+                title  = parts[1].strip()
+                if artist and title:
+                    songs.append({
+                        "artist": artist,
+                        "title":  title,
+                        "album":  "",
+                        "source": "Korean Indie",
+                    })
+
+        print(f"  Korean Indie: {len(songs)}曲")
+    except Exception as e:
+        print(f"  ⚠️ Korean Indie失敗: {e}")
+    return songs
+
+
+def fetch_bandcamp_tags() -> list:
+    """Bandcampのタグページからアジアのインディーアーティストを収集"""
+    songs = []
+    tags = [
+        ("city-pop", "City Pop"),
+        ("j-indie", "J-Indie"),
+        ("k-indie", "K-Indie"),
+        ("thai-indie", "Thai Indie"),
+        ("indonesian-indie", "Indonesian Indie"),
+    ]
+
+    for tag, source_name in tags:
+        try:
+            resp = requests.get(
+                f"https://bandcamp.com/tag/{tag}?sort_field=date",
+                timeout=15,
+                headers={"User-Agent": "Mozilla/5.0"}
+            )
+            if resp.status_code != 200:
+                continue
+
+            import re
+            # Bandcampのタグページからアーティスト・タイトルを抽出
+            items = re.findall(
+                r'"title":"([^"]+)","artist":"([^"]+)"',
+                resp.text
+            )
+            for title, artist in items[:5]:
+                if artist and title:
+                    songs.append({
+                        "artist": artist,
+                        "title":  title,
+                        "album":  "",
+                        "source": source_name,
+                    })
+
+            print(f"  Bandcamp/{tag}: {min(len(items), 5)}曲")
+            time.sleep(0.5)
+
+        except Exception as e:
+            print(f"  ⚠️ Bandcamp/{tag}失敗: {e}")
+
+    return songs
 
 def fetch_all_sources(hours: int = 24) -> list:
     """全ソースから収集・重複除去"""
     all_songs = []
 
-    # KEXP API
+    # KEXP API（欧米インディー）
     all_songs.extend(fetch_kexp(hours=hours))
 
-    # RSS ソース
-    rss_sources = [
-        ("https://www.koreanindie.com/feed/",               "Korean Indie"),
-        ("https://a-indie.com/feed",                         "A-indie"),
-        ("https://parapop.net/feed",                         "ParaPOP"),
-        ("https://www.radiofrance.fr/fip/rss",               "FIP"),
-    ]
-    for url, name in rss_sources:
-        all_songs.extend(fetch_rss(url, name))
+    # Spincoaster RSS（日本インディー）
+    all_songs.extend(fetch_rss(
+        "https://spincoaster.com/feed",
+        "Spincoaster"
+    ))
 
-    # 重複除去（artist+titleで判定）
+    # Korean Indie（スクレイピング）
+    all_songs.extend(fetch_koreanindie())
+
+    # Bandcamp タグ検索（東南アジア・アジア）
+    all_songs.extend(fetch_bandcamp_tags())
+
+    # FIP RSS（ジャズ・ワールド・欧州）
+    all_songs.extend(fetch_rss(
+        "https://www.radiofrance.fr/fip/rss",
+        "FIP"
+    ))
+
+    # 重複除去
     seen = set()
     unique = []
     for s in all_songs:
