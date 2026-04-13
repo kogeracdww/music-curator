@@ -205,8 +205,9 @@ def classify_and_comment(songs: list) -> dict:
   ]
 }}
 
-朝・夜それぞれ最大10曲を選んでください。
+朝・夜それぞれ必ず15曲以上を選んでください。
 どちらにも当てはまらない曲はより近い方に入れてください。
+曲が少ない場合は全曲をどちらかに振り分けてください。
 """
 
     message = client.messages.create(
@@ -253,48 +254,61 @@ def search_youtube_video(youtube, artist: str, title: str) -> dict:
     """
     YouTube検索 → 長さフィルタ
     ショート(60秒未満)・長尺(600秒以上)を除外
+    複数クエリで検索してヒット率を上げる
     """
-    try:
-        resp = youtube.search().list(
-            part="snippet",
-            q=f"{artist} {title} official",
-            type="video",
-            maxResults=5,
-            videoCategoryId="10",
-        ).execute()
+    queries = [
+        f"{artist} {title}",
+        f"{artist} {title} official",
+        f"{artist} {title} music video",
+        f"{artist} {title} audio",
+    ]
 
-        video_ids = [
-            item["id"]["videoId"]
-            for item in resp.get("items", [])
-        ]
-        if not video_ids:
-            return {}
+    for query in queries:
+        try:
+            resp = youtube.search().list(
+                part="snippet",
+                q=query,
+                type="video",
+                maxResults=5,
+                videoCategoryId="10",
+            ).execute()
 
-        details = youtube.videos().list(
-            part="contentDetails",
-            id=",".join(video_ids)
-        ).execute()
+            video_ids = [
+                item["id"]["videoId"]
+                for item in resp.get("items", [])
+            ]
+            if not video_ids:
+                continue
 
-        for item in details.get("items", []):
-            sec = parse_duration(
-                item["contentDetails"]["duration"]
-            )
-            if 60 <= sec < 600:
-                vid = item["id"]
-                return {
-                    "youtube_video_id": vid,
-                    "youtube_url": f"https://youtu.be/{vid}",
-                    "duration_seconds": sec,
-                }
-    except Exception as e:
-        print(f"    ⚠️ YouTube検索失敗: {artist} - {e}")
+            details = youtube.videos().list(
+                part="contentDetails",
+                id=",".join(video_ids)
+            ).execute()
+
+            for item in details.get("items", []):
+                sec = parse_duration(
+                    item["contentDetails"]["duration"]
+                )
+                if 60 <= sec < 600:
+                    vid = item["id"]
+                    return {
+                        "youtube_video_id": vid,
+                        "youtube_url": f"https://youtu.be/{vid}",
+                        "duration_seconds": sec,
+                    }
+
+        except Exception as e:
+            print(f"    ⚠️ YouTube検索失敗: {query} - {e}")
+            continue
+
     return {}
 
 
-def enrich_with_youtube(youtube, songs: list, n: int = 10) -> list:
+def enrich_with_youtube(youtube, songs: list,
+                        n: int = 10, max_attempts: int = 20) -> list:
     """各曲にYouTube情報を付加・フィルタリング"""
     enriched = []
-    for song in songs:
+    for song in songs[:max_attempts]:
         if len(enriched) >= n:
             break
         yt = search_youtube_video(youtube, song["artist"], song["title"])
@@ -408,7 +422,7 @@ def main():
 
     # 全ソースから収集
     print("\n📻 ラジオ局・メディアから収集中...")
-    raw_songs = fetch_all_sources(hours=24)
+    raw_songs = fetch_all_sources(hours=72)
 
     if not raw_songs:
         print("⚠️ 曲が取得できませんでした")
@@ -424,7 +438,8 @@ def main():
         print(f"\n{label} YouTube検索中...")
 
         songs_yt = enrich_with_youtube(
-            youtube, classified[slot], n=10
+            youtube, classified[slot], n=10,
+            max_attempts=20
         )
 
         for i, s in enumerate(songs_yt, 1):
