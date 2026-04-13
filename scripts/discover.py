@@ -388,7 +388,7 @@ def classify_and_comment(songs: list) -> dict:
 
     prompt = f"""
 あなたは音楽キュレーターです。
-世界の厳選ラジオ局（KEXP・Korean Indie・A-indie・ParaPOP・FIP）が
+世界の厳選ラジオ局（KEXP・Korean Indie・Spincoaster・Bandcamp・FIP）が
 紹介した曲を朝用・深夜用に振り分けてください。
 
 【朝用の雰囲気・ジャンル】
@@ -425,8 +425,7 @@ def classify_and_comment(songs: list) -> dict:
 曲が少ない場合は全曲をどちらかに振り分けてください。
 """
 
-    message = client.messages.create(
-        # リトライ処理（過負荷対策）
+    last_error = None
     for attempt in range(3):
         try:
             message = client.messages.create(
@@ -436,12 +435,12 @@ def classify_and_comment(songs: list) -> dict:
             )
             break
         except Exception as e:
+            last_error = e
             if attempt < 2:
                 print(f"  ⚠️ Claude API一時エラー、リトライ中... ({e})")
                 time.sleep(10)
             else:
-                raise
-    )
+                raise last_error
 
     raw = message.content[0].text.strip()
     if "```" in raw:
