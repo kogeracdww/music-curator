@@ -1,37 +1,43 @@
 """
 STEP B-1: discover.py
-YouTube Data APIで36時間以内にアップされた実在の曲を検索・発掘する
-→ Claude APIは一言コメント生成のみに使用
-→ 発掘後にTodayプレイリストを更新する
+ラジオ局API/RSSから曲を収集して朝・夜のプレイリストを作る
+
+ソース：
+  KEXP API        → 欧米インディー全般
+  Korean Indie RSS → K-Indie
+  A-indie RSS      → 日本・アジア全般
+  ParaPOP RSS      → 東南アジア
+  FIP RSS          → ジャズ・ワールド・欧州
 """
 
 import os
 import json
 import datetime
+import time
+import re
+import requests
+import xml.etree.ElementTree as ET
 import anthropic
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import WEEKDAY_CONFIG, DISCOVERY_RULES, SLOT_CONFIG
+from config import WEEKDAY_CONFIG, SLOT_CONFIG
+
+JST = datetime.timezone(datetime.timedelta(hours=9))
 
 
 def get_today_config():
-    weekday = datetime.datetime.now(
-        datetime.timezone(datetime.timedelta(hours=9))
-    ).weekday()
+    weekday = datetime.datetime.now(JST).weekday()
     return weekday, WEEKDAY_CONFIG[weekday]
 
 
 def get_youtube_client():
-    """YouTube APIクライアントを取得"""
-    import json as json_mod
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
     from googleapiclient.discovery import build
 
-    client_secret = json_mod.loads(os.environ["YOUTUBE_CLIENT_SECRET"])
+    client_secret = json.loads(os.environ["YOUTUBE_CLIENT_SECRET"])
     refresh_token = os.environ["YOUTUBE_REFRESH_TOKEN"]
-
     creds = Credentials(
         token=None,
         refresh_token=refresh_token,
@@ -43,101 +49,169 @@ def get_youtube_client():
     return build("youtube", "v3", credentials=creds)
 
 
-def search_new_songs(youtube, slot: str, region_countries: list) -> list:
-    """
-    YouTube Data APIで36時間以内にアップされた曲を検索
-    """
-    slot_cfg = SLOT_CONFIG[slot]
-    genres = slot_cfg["genres"]
-    hours = DISCOVERY_RULES["release_hours"]
-    n = DISCOVERY_RULES["songs_per_day"]
+# ── ソース別収集 ──────────────────────────────────────
 
-    published_after = (
+def fetch_kexp(hours: int = 24) -> list:
+    """KEXP APIから過去N時間の曲を取得"""
+    since = (
         datetime.datetime.now(datetime.timezone.utc)
         - datetime.timedelta(hours=hours)
     ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    found = []
-    seen_ids = set()
+    songs = []
+    url = (
+        f"https://api.kexp.org/v2/plays/"
+        f"?play_type=trackplay&airdate_after={since}&limit=200"
+    )
+    try:
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        for item in resp.json().get("results", []):
+            artist = item.get("artist", "").strip()
+            song   = item.get("song", "").strip()
+            if artist and song:
+                songs.append({
+                    "artist": artist,
+                    "title":  song,
+                    "album":  item.get("album", ""),
+                    "source": "KEXP",
+                })
+        print(f"  KEXP: {len(songs)}曲")
+    except Exception as e:
+        print(f"  ⚠️ KEXP失敗: {e}")
+    return songs
 
-    # ジャンルごとに検索
-    for genre in genres:
-        if len(found) >= n:
-            break
 
-        query = f"{genre} music original"
-        try:
-            response = youtube.search().list(
-                part="snippet",
-                q=query,
-                type="video",
-                publishedAfter=published_after,
-                videoCategoryId="10",  # Music
-                maxResults=5,
-                order="date",
-            ).execute()
+def fetch_rss(url: str, source_name: str) -> list:
+    """
+    汎用RSSパーサー
+    タイトルから「Artist - Song」または「Song / Artist」を抽出
+    """
+    songs = []
+    try:
+        resp = requests.get(url, timeout=15,
+                            headers={"User-Agent": "MusicCuratorBot/1.0"})
+        resp.raise_for_status()
+        root = ET.fromstring(resp.content)
 
-            for item in response.get("items", []):
-                if len(found) >= n:
-                    break
+        for item in root.findall(".//item"):
+            raw_title = item.findtext("title", "").strip()
+            if not raw_title:
+                continue
 
-                vid = item["id"]["videoId"]
-                if vid in seen_ids:
-                    continue
-                seen_ids.add(vid)
+            # 「Artist - Song」形式
+            if " - " in raw_title:
+                parts = raw_title.split(" - ", 1)
+                artist = parts[0].strip()
+                title  = parts[1].strip()
+            # 「Song / Artist」形式
+            elif " / " in raw_title:
+                parts = raw_title.split(" / ", 1)
+                title  = parts[0].strip()
+                artist = parts[1].strip()
+            else:
+                # タイトルのみ判別できない場合はskip
+                continue
 
-                snippet = item["snippet"]
-                found.append({
-                    "artist": snippet["channelTitle"],
-                    "title": snippet["title"],
-                    "youtube_video_id": vid,
-                    "youtube_url": f"https://youtu.be/{vid}",
-                    "genre": genre,
-                    "country": "Unknown",
-                    "followers": "0",
-                    "comment_ja": "",
-                    "comment_en": "",
-                    "published_at": snippet["publishedAt"],
+            if artist and title:
+                songs.append({
+                    "artist": artist,
+                    "title":  title,
+                    "album":  "",
+                    "source": source_name,
                 })
 
-        except Exception as e:
-            print(f"  ⚠️  検索失敗 ({genre}): {e}")
+        print(f"  {source_name}: {len(songs)}曲")
+    except Exception as e:
+        print(f"  ⚠️ {source_name}失敗: {e}")
+    return songs
 
-    return found[:n]
+
+def fetch_all_sources(hours: int = 24) -> list:
+    """全ソースから収集・重複除去"""
+    all_songs = []
+
+    # KEXP API
+    all_songs.extend(fetch_kexp(hours=hours))
+
+    # RSS ソース
+    rss_sources = [
+        ("https://www.koreanindie.com/feed/",               "Korean Indie"),
+        ("https://a-indie.com/feed",                         "A-indie"),
+        ("https://parapop.net/feed",                         "ParaPOP"),
+        ("https://www.radiofrance.fr/fip/rss",               "FIP"),
+    ]
+    for url, name in rss_sources:
+        all_songs.extend(fetch_rss(url, name))
+
+    # 重複除去（artist+titleで判定）
+    seen = set()
+    unique = []
+    for s in all_songs:
+        key = f"{s['artist'].lower()}_{s['title'].lower()}"
+        if key not in seen:
+            seen.add(key)
+            unique.append(s)
+
+    print(f"  統合後: {len(unique)}曲（重複除去済み）")
+    return unique
 
 
-def generate_comments(songs: list, slot: str, weekday_config: dict) -> list:
-    """Claude APIで一言コメントを生成"""
+# ── Claude APIで振り分け＋コメント生成 ────────────────
+
+def classify_and_comment(songs: list) -> dict:
+    """朝・夜に振り分けてコメント生成"""
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    slot_cfg = SLOT_CONFIG[slot]
+
+    morning_genres = " / ".join(SLOT_CONFIG["morning"]["genres"])
+    evening_genres = " / ".join(SLOT_CONFIG["evening"]["genres"])
 
     songs_text = "\n".join([
-        f"{i+1}. {s['artist']} - {s['title']} (Genre: {s['genre']})"
+        f"{i+1}. {s['artist']} - {s['title']} [{s['source']}]"
         for i, s in enumerate(songs)
     ])
 
     prompt = f"""
-以下の楽曲リストに対して、それぞれ一言コメントを生成してください。
+あなたは音楽キュレーターです。
+世界の厳選ラジオ局（KEXP・Korean Indie・A-indie・ParaPOP・FIP）が
+紹介した曲を朝用・深夜用に振り分けてください。
 
-プレイリストの雰囲気: {slot_cfg['description']}
+【朝用の雰囲気・ジャンル】
+{morning_genres}
+少しポジティブ・上質・爽やか・母国語以外の歌詞が望ましい
 
-楽曲リスト:
+【深夜用の雰囲気・ジャンル】
+{evening_genres}
+チルアウト・深い・落ち着いた・作業に合う
+
+【曲リスト】
 {songs_text}
 
 【出力形式】
-必ずJSON配列のみを返してください。他のテキストは一切不要です。
+必ずJSON形式のみで返してください。前後に余計なテキスト不要。
 
-[
-  {{
-    "comment_ja": "この曲の魅力を伝える一言（日本語・30文字以内）",
-    "comment_en": "One-line comment in English (under 50 chars)"
-  }}
-]
+{{
+  "morning": [
+    {{
+      "index": 1,
+      "comment_en": "One-line comment under 60 chars"
+    }}
+  ],
+  "evening": [
+    {{
+      "index": 2,
+      "comment_en": "One-line comment under 60 chars"
+    }}
+  ]
+}}
+
+朝・夜それぞれ最大10曲を選んでください。
+どちらにも当てはまらない曲はより近い方に入れてください。
 """
 
     message = client.messages.create(
         model="claude-sonnet-4-5",
-        max_tokens=2000,
+        max_tokens=3000,
         messages=[{"role": "user", "content": prompt}]
     )
 
@@ -146,63 +220,119 @@ def generate_comments(songs: list, slot: str, weekday_config: dict) -> list:
         raw = raw.split("```")[1]
         if raw.startswith("json"):
             raw = raw[4:]
+    raw = raw.strip()
 
-    comments = json.loads(raw.strip())
+    result = json.loads(raw)
 
-    for i, song in enumerate(songs):
-        if i < len(comments):
-            song["comment_ja"] = comments[i].get("comment_ja", "")
-            song["comment_en"] = comments[i].get("comment_en", "")
+    classified = {"morning": [], "evening": []}
+    for slot in ["morning", "evening"]:
+        for item in result.get(slot, []):
+            idx = item["index"] - 1
+            if 0 <= idx < len(songs):
+                song = songs[idx].copy()
+                song["comment_en"] = item.get("comment_en", "")
+                classified[slot].append(song)
 
-    return songs
+    return classified
 
 
-def save_results(songs: list, slot: str, weekday: int, config: dict) -> str:
-    today = datetime.datetime.now(
-        datetime.timezone(datetime.timedelta(hours=9))
-    ).strftime("%Y-%m-%d")
+# ── YouTube検索・長さフィルタリング ──────────────────
 
-    result = {
-        "date": today,
-        "slot": slot,
-        "weekday": weekday,
-        "region": config["region"],
-        "bgm": config["bgm"],
-        "dancer_prefix": config["dancer_prefix"],
-        "songs": songs,
-    }
+def parse_duration(duration: str) -> int:
+    """ISO 8601 (PT3M45S) → 秒"""
+    match = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', duration)
+    if not match:
+        return 0
+    h = int(match.group(1) or 0)
+    m = int(match.group(2) or 0)
+    s = int(match.group(3) or 0)
+    return h * 3600 + m * 60 + s
 
-    os.makedirs("data", exist_ok=True)
-    path = f"data/discovery_{today}_{slot}.json"
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
 
-    print(f"✅ 保存完了: {len(songs)}曲 → {path}")
-    return path
+def search_youtube_video(youtube, artist: str, title: str) -> dict:
+    """
+    YouTube検索 → 長さフィルタ
+    ショート(60秒未満)・長尺(600秒以上)を除外
+    """
+    try:
+        resp = youtube.search().list(
+            part="snippet",
+            q=f"{artist} {title} official",
+            type="video",
+            maxResults=5,
+            videoCategoryId="10",
+        ).execute()
 
+        video_ids = [
+            item["id"]["videoId"]
+            for item in resp.get("items", [])
+        ]
+        if not video_ids:
+            return {}
+
+        details = youtube.videos().list(
+            part="contentDetails",
+            id=",".join(video_ids)
+        ).execute()
+
+        for item in details.get("items", []):
+            sec = parse_duration(
+                item["contentDetails"]["duration"]
+            )
+            if 60 <= sec < 600:
+                vid = item["id"]
+                return {
+                    "youtube_video_id": vid,
+                    "youtube_url": f"https://youtu.be/{vid}",
+                    "duration_seconds": sec,
+                }
+    except Exception as e:
+        print(f"    ⚠️ YouTube検索失敗: {artist} - {e}")
+    return {}
+
+
+def enrich_with_youtube(youtube, songs: list, n: int = 10) -> list:
+    """各曲にYouTube情報を付加・フィルタリング"""
+    enriched = []
+    for song in songs:
+        if len(enriched) >= n:
+            break
+        yt = search_youtube_video(youtube, song["artist"], song["title"])
+        if not yt:
+            print(f"    スキップ: {song['artist']} - {song['title']}")
+            continue
+        song.update(yt)
+        enriched.append(song)
+        time.sleep(0.3)
+    return enriched
+
+
+# ── プレイリスト更新 ──────────────────────────────────
 
 def update_today_playlist(youtube, songs: list, slot: str):
-    """Todayプレイリストを更新（既存削除→新規追加）"""
-    if slot == "morning":
-        playlist_id = os.environ["YT_PLAYLIST_TODAY"]
-    else:
-        playlist_id = os.environ["YT_PLAYLIST_YESTERDAY"]
+    playlist_id = os.environ.get(
+        "YT_PLAYLIST_TODAY" if slot == "morning"
+        else "YT_PLAYLIST_YESTERDAY", ""
+    )
+    if not playlist_id:
+        print("  ⚠️ プレイリストIDなし")
+        return
 
-    # 既存アイテムを全削除
+    # クリア
     try:
         existing = youtube.playlistItems().list(
             part="id", playlistId=playlist_id, maxResults=50
         ).execute()
         for item in existing.get("items", []):
             youtube.playlistItems().delete(id=item["id"]).execute()
-        print(f"🗑  プレイリストをクリア")
+        print("  🗑 クリア完了")
     except Exception as e:
-        print(f"  ⚠️  クリア失敗: {e}")
+        print(f"  ⚠️ クリア失敗: {e}")
 
-    # 新しい曲を追加
+    # 追加
     added = 0
     for song in songs:
-        vid = song.get("youtube_video_id", "").strip()
+        vid = song.get("youtube_video_id", "")
         if not vid:
             continue
         try:
@@ -218,128 +348,57 @@ def update_today_playlist(youtube, songs: list, slot: str):
             ).execute()
             added += 1
         except Exception as e:
-            print(f"  ⚠️  追加失敗: {song['title']} - {e}")
+            print(f"  ⚠️ 追加失敗: {song['title']} - {e}")
+    print(f"  ✅ {added}曲追加")
 
-    print(f"✅ プレイリスト更新完了: {added}曲追加")
-# 曜日別楽器グループ
+
+# ── 保存 ──────────────────────────────────────────────
+
+def save_results(songs: list, slot: str, weekday: int, config: dict):
+    today = datetime.datetime.now(JST).strftime("%Y-%m-%d")
+    result = {
+        "date":          today,
+        "slot":          slot,
+        "weekday":       weekday,
+        "region":        config["region"],
+        "bgm":           config["bgm"],
+        "dancer_prefix": config["dancer_prefix"],
+        "songs":         songs,
+    }
+    os.makedirs("data", exist_ok=True)
+    path = f"data/discovery_{today}_{slot}.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+    print(f"  ✅ 保存: {len(songs)}曲 → {path}")
+
+
+# ── X候補データ生成 ───────────────────────────────────
+
 INSTRUMENT_GROUPS = {
-    0: {  # 月
-        "label": "Group A",
-        "instruments": [
-            "Vibraphone", "Contrabass", "Balalaika", "Clarinet",
-            "Bassoon", "Didgeridoo", "Taiko", "OP-1 synthesizer",
-            "Cymbals", "Musical Saw"
-        ]
-    },
-    1: {  # 火
-        "label": "Group B",
-        "instruments": [
-            "Tambourine", "Handpan", "Snare Drum", "Viola",
-            "Sitar", "Sarod", "Harmonica", "French Horn",
-            "Harmonium", "Angklung"
-        ]
-    },
-    2: {  # 水
-        "label": "Group C",
-        "instruments": [
-            "Marimba", "Piano", "Harp", "Ocarina",
-            "Pipe Organ", "Kalimba", "Celesta", "Mridangam",
-            "Tongue Drum", "Roland TB-303"
-        ]
-    },
-    3: {  # 木
-        "label": "Group D",
-        "instruments": [
-            "Guitar", "Mandolin", "Flute", "Trombone",
-            "Shakuhachi", "Tabla", "Balafon", "Timpani",
-            "Xylophone", "Djembe"
-        ]
-    },
-    4: {  # 金
-        "label": "Group E",
-        "instruments": [
-            "Violin", "Koto", "Gayageum", "Charango",
-            "Recorder", "Alphorn", "Kalimba", "Conga",
-            "Akai MPC", "Theremin"
-        ]
-    },
-    5: {  # 土
-        "label": "Group F",
-        "instruments": [
-            "Cello", "Shamisen", "Saxophone", "Oboe",
-            "Steelpan", "Bongo drum", "Bodhran", "Guitarron",
-            "Roland TR-808", "Theremin"
-        ]
-    },
-    6: {  # 日
-        "label": "Group G",
-        "instruments": [
-            "Handpan", "Ukulele", "Erhu", "Oud",
-            "Trumpet", "Tuba", "Djembe", "Glockenspiel",
-            "Mellotron", "Biwa"
-        ]
-    },
+    0: {"label": "Group A", "instruments": ["Vibraphone","Contrabass","Balalaika","Clarinet","Bassoon","Didgeridoo","Taiko","OP-1 synthesizer","Cymbals","Musical Saw"]},
+    1: {"label": "Group B", "instruments": ["Tambourine","Handpan","Snare Drum","Viola","Sitar","Sarod","Harmonica","French Horn","Harmonium","Angklung"]},
+    2: {"label": "Group C", "instruments": ["Marimba","Piano","Harp","Ocarina","Pipe Organ","Kalimba","Celesta","Mridangam","Tongue Drum","Roland TB-303"]},
+    3: {"label": "Group D", "instruments": ["Guitar","Mandolin","Flute","Trombone","Shakuhachi","Tabla","Balafon","Timpani","Xylophone","Djembe"]},
+    4: {"label": "Group E", "instruments": ["Violin","Koto","Gayageum","Charango","Recorder","Alphorn","Kalimba","Conga","Akai MPC","Theremin"]},
+    5: {"label": "Group F", "instruments": ["Cello","Shamisen","Saxophone","Oboe","Steelpan","Bongo drum","Bodhran","Guitarron","Roland TR-808","Theremin"]},
+    6: {"label": "Group G", "instruments": ["Handpan","Ukulele","Erhu","Oud","Trumpet","Tuba","Djembe","Glockenspiel","Mellotron","Biwa"]},
 }
 
 
-def search_x_candidates(youtube, weekday: int, n: int = 10) -> list:
-    """
-    YouTube Data APIで演奏動画を検索してXリポスト候補をリストアップ
-    ・当日の楽器グループから検索
-    ・6日以内に投稿された動画
-    ・10件
-    """
-    group = INSTRUMENT_GROUPS[weekday]
-    instruments = group["instruments"]
+def save_x_candidates(weekday: int):
+    today = datetime.datetime.now(JST).strftime("%Y-%m-%d")
+    x_data = {
+        "date":       today,
+        "weekday":    weekday,
+        "group":      INSTRUMENT_GROUPS[weekday]["label"],
+        "candidates": [],
+    }
+    os.makedirs("data", exist_ok=True)
+    with open(f"data/x_candidates_{today}.json", "w", encoding="utf-8") as f:
+        json.dump(x_data, f, ensure_ascii=False, indent=2)
 
-    published_after = (
-        datetime.datetime.now(datetime.timezone.utc)
-        - datetime.timedelta(days=6)
-    ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    found = []
-    seen_ids = set()
-
-    for instrument in instruments:
-        if len(found) >= n:
-            break
-
-        query = f"{instrument} performance playing"
-        try:
-            response = youtube.search().list(
-                part="snippet",
-                q=query,
-                type="video",
-                publishedAfter=published_after,
-                videoCategoryId="10",  # Music
-                maxResults=3,
-                order="date",
-            ).execute()
-
-            for item in response.get("items", []):
-                if len(found) >= n:
-                    break
-
-                vid = item["id"]["videoId"]
-                if vid in seen_ids:
-                    continue
-                seen_ids.add(vid)
-
-                snippet = item["snippet"]
-                found.append({
-                    "instrument": instrument,
-                    "channel": snippet["channelTitle"],
-                    "title": snippet["title"],
-                    "video_id": vid,
-                    "url": f"https://youtu.be/{vid}",
-                    "published_at": snippet["publishedAt"],
-                })
-
-        except Exception as e:
-            print(f"  ⚠️  X候補検索失敗 ({instrument}): {e}")
-
-    print(f"  📋 X候補: {len(found)}件取得")
-    return found[:n]
+# ── メイン ────────────────────────────────────────────
 
 def main():
     weekday, config = get_today_config()
@@ -347,42 +406,39 @@ def main():
 
     youtube = get_youtube_client()
 
-    # YouTube発掘（朝・夜）
-    all_data = {}
+    # 全ソースから収集
+    print("\n📻 ラジオ局・メディアから収集中...")
+    raw_songs = fetch_all_sources(hours=24)
+
+    if not raw_songs:
+        print("⚠️ 曲が取得できませんでした")
+        return
+
+    # Claude APIで振り分け
+    print("\n🤖 朝・夜に振り分け中...")
+    classified = classify_and_comment(raw_songs)
+
+    # YouTube検索・保存・プレイリスト更新
     for slot in ["morning", "evening"]:
-        slot_cfg = SLOT_CONFIG[slot]
-        print(f"\n{'🌅' if slot == 'morning' else '🌙'} {slot_cfg['title_prefix']}")
-        print(f"  ジャンル: {' / '.join(slot_cfg['genres'])}")
+        label = "🌅 朝枠" if slot == "morning" else "🌙 深夜枠"
+        print(f"\n{label} YouTube検索中...")
 
-        print("  🔍 YouTube APIで曲を検索中...")
-        songs = search_new_songs(youtube, slot, config["countries"])
-        print(f"  📋 {len(songs)}曲取得")
+        songs_yt = enrich_with_youtube(
+            youtube, classified[slot], n=10
+        )
 
-        for i, s in enumerate(songs, 1):
-            print(f"    {i:2d}. {s['artist']} - {s['title']}")
+        for i, s in enumerate(songs_yt, 1):
+            dur = s.get("duration_seconds", 0)
+            print(f"  {i:2d}. {s['artist']} - {s['title']} "
+                  f"({dur//60}:{dur%60:02d}) [{s['source']}]")
 
-        print("  💬 コメント生成中...")
-        songs = generate_comments(songs, slot, config)
+        save_results(songs_yt, slot, weekday, config)
 
-        save_results(songs, slot, weekday, config)
+        print(f"  📋 プレイリスト更新中...")
+        update_today_playlist(youtube, songs_yt, slot)
 
-        print("  📋 プレイリスト更新中...")
-        update_today_playlist(youtube, songs, slot)
-
-        all_data[slot] = songs
-# X候補データ生成（検索リンク方式・API不要）
-    today = datetime.datetime.now(
-        datetime.timezone(datetime.timedelta(hours=9))
-    ).strftime("%Y-%m-%d")
-
-    x_data = {
-        "date": today,
-        "weekday": weekday,
-        "group": INSTRUMENT_GROUPS[weekday]["label"],
-        "candidates": [],
-    }
-    with open(f"data/x_candidates_{today}.json", "w", encoding="utf-8") as f:
-        json.dump(x_data, f, ensure_ascii=False, indent=2)
+    # X候補保存
+    save_x_candidates(weekday)
 
     print("\n✅ 全処理完了")
 
