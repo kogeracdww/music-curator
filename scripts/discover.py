@@ -258,9 +258,6 @@ def search_youtube_video(youtube, artist: str, title: str) -> dict:
     """
     queries = [
         f"{artist} {title}",
-        f"{artist} {title} official",
-        f"{artist} {title} music video",
-        f"{artist} {title} audio",
     ]
 
     for query in queries:
@@ -427,6 +424,12 @@ def main():
     if not raw_songs:
         print("⚠️ 曲が取得できませんでした")
         return
+
+    # 30曲に絞ってからClaudeに渡す（クォータ節約）
+    import random
+    if len(raw_songs) > 30:
+        raw_songs = random.sample(raw_songs, 30)
+        print(f"  → 30曲にランダム絞り込み")
 
     # Claude APIで振り分け
     print("\n🤖 朝・夜に振り分け中...")
