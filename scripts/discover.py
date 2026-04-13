@@ -179,34 +179,46 @@ def fetch_kexp(hours: int = 24) -> list:
 
 
 def fetch_rss(url: str, source_name: str) -> list:
-    """
-    汎用RSSパーサー
-    タイトルから「Artist - Song」または「Song / Artist」を抽出
-    """
+    """汎用RSSパーサー"""
     songs = []
     try:
-        resp = requests.get(url, timeout=15,
-                            headers={"User-Agent": "MusicCuratorBot/1.0"})
+        resp = requests.get(
+            url, timeout=15,
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; MusicCuratorBot/1.0)",
+                "Accept": "application/rss+xml, application/xml, text/xml, */*",
+            }
+        )
         resp.raise_for_status()
-        root = ET.fromstring(resp.content)
+
+        # エンコーディングを明示的に設定
+        resp.encoding = resp.apparent_encoding or "utf-8"
+        content = resp.content
+
+        # 不正なXML文字を除去してパース
+        try:
+            root = ET.fromstring(content)
+        except ET.ParseError:
+            # 不正文字を除去して再試行
+            clean = re.sub(
+                rb'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', b'', content
+            )
+            root = ET.fromstring(clean)
 
         for item in root.findall(".//item"):
             raw_title = item.findtext("title", "").strip()
             if not raw_title:
                 continue
 
-            # 「Artist - Song」形式
             if " - " in raw_title:
                 parts = raw_title.split(" - ", 1)
                 artist = parts[0].strip()
                 title  = parts[1].strip()
-            # 「Song / Artist」形式
             elif " / " in raw_title:
                 parts = raw_title.split(" / ", 1)
                 title  = parts[0].strip()
                 artist = parts[1].strip()
             else:
-                # タイトルのみ判別できない場合はskip
                 continue
 
             if artist and title:
