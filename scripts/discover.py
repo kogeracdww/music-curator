@@ -291,24 +291,40 @@ def fetch_bandcamp_tags() -> list:
                 headers={"User-Agent": "Mozilla/5.0"}
             )
             if resp.status_code != 200:
+                print(f"  ⚠️ Bandcamp/{tag}: {resp.status_code}")
                 continue
 
+            import json as json_mod
+            # data-blob属性からJSONを抽出
             import re
-            # Bandcampのタグページからアーティスト・タイトルを抽出
-            items = re.findall(
-                r'"title":"([^"]+)","artist":"([^"]+)"',
-                resp.text
+            match = re.search(
+                r'data-blob="([^"]+)"', resp.text
             )
-            for title, artist in items[:5]:
-                if artist and title:
-                    songs.append({
-                        "artist": artist,
-                        "title":  title,
-                        "album":  "",
-                        "source": source_name,
-                    })
+            if match:
+                blob = match.group(1).replace('&quot;', '"')
+                try:
+                    data = json_mod.loads(blob)
+                    items = data.get("hub", {}).get(
+                        "tabs", [{}]
+                    )[0].get("items", [])
+                    count = 0
+                    for item in items[:8]:
+                        artist = item.get("band_name", "")
+                        title  = item.get("title", "")
+                        if artist and title:
+                            songs.append({
+                                "artist": artist,
+                                "title":  title,
+                                "album":  item.get("album_title", ""),
+                                "source": source_name,
+                            })
+                            count += 1
+                    print(f"  Bandcamp/{tag}: {count}曲")
+                except Exception:
+                    pass
+            else:
+                print(f"  Bandcamp/{tag}: データなし")
 
-            print(f"  Bandcamp/{tag}: {min(len(items), 5)}曲")
             time.sleep(0.5)
 
         except Exception as e:
@@ -323,10 +339,10 @@ def fetch_all_sources(hours: int = 24) -> list:
     # KEXP API（欧米インディー）
     all_songs.extend(fetch_kexp(hours=hours))
 
-    # Spincoaster RSS（日本インディー）
+    # FIP RSS（ジャズ・ワールド・欧州）
     all_songs.extend(fetch_rss(
-        "https://spincoaster.com/feed",
-        "Spincoaster"
+        "https://www.radiofrance.fr/fip/rss.xml",
+        "FIP"
     ))
 
     # Korean Indie（スクレイピング）
