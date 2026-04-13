@@ -550,9 +550,9 @@ def main():
         raw_songs = random.sample(raw_songs, 30)
         print(f"  → 30曲にランダム絞り込み")
 
-    # Spotifyで曲情報・Audio Featuresを付加
-    print("\n🎵 Spotifyで曲情報を取得中...")
-    raw_songs = enrich_with_spotify(raw_songs)
+    # Spotify（現在無効化中）
+    # print("\n🎵 Spotifyで曲情報を取得中...")
+    # raw_songs = enrich_with_spotify(raw_songs)
 
     # Claude APIで振り分け（Audio Features情報も渡す）
     print("\n🤖 朝・夜に振り分け中...")
