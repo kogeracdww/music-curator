@@ -52,7 +52,7 @@ def get_youtube_client():
 def get_spotify_token() -> str:
     """Spotify APIのアクセストークンを取得"""
     import base64
-    client_id = os.environ["SPOTIFY_CLIENT_ID"]
+    client_id     = os.environ["SPOTIFY_CLIENT_ID"]
     client_secret = os.environ["SPOTIFY_CLIENT_SECRET"]
 
     credentials = base64.b64encode(
@@ -61,11 +61,19 @@ def get_spotify_token() -> str:
 
     resp = requests.post(
         "https://accounts.spotify.com/api/token",
-        headers={"Authorization": f"Basic {credentials}"},
+        headers={
+            "Authorization": f"Basic {credentials}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
         data={"grant_type": "client_credentials"},
         timeout=10
     )
-    return resp.json()["access_token"]
+    resp.raise_for_status()
+    token = resp.json().get("access_token")
+    if not token:
+        raise ValueError(f"Spotifyトークン取得失敗: {resp.text}")
+    print(f"  ✅ Spotify認証成功")
+    return token
 
 
 def search_spotify(token: str, artist: str, title: str) -> dict:
@@ -333,52 +341,48 @@ def parse_duration(duration: str) -> int:
 def search_youtube_video(youtube, artist: str, title: str) -> dict:
     """
     YouTube検索 → 長さフィルタ
+    1曲につき1回のみ検索（クォータ節約）
     ショート(60秒未満)・長尺(600秒以上)を除外
-    複数クエリで検索してヒット率を上げる
     """
-    queries = [
-        f"{artist} {title}",
-    ]
+    try:
+        query = f"{artist} {title}"
+        resp = youtube.search().list(
+            part="snippet",
+            q=query,
+            type="video",
+            maxResults=5,
+            videoCategoryId="10",
+        ).execute()
 
-    for query in queries:
-        try:
-            resp = youtube.search().list(
-                part="snippet",
-                q=query,
-                type="video",
-                maxResults=5,
-                videoCategoryId="10",
-            ).execute()
+        video_ids = [
+            item["id"]["videoId"]
+            for item in resp.get("items", [])
+        ]
+        if not video_ids:
+            return {}
 
-            video_ids = [
-                item["id"]["videoId"]
-                for item in resp.get("items", [])
-            ]
-            if not video_ids:
-                continue
+        details = youtube.videos().list(
+            part="contentDetails",
+            id=",".join(video_ids)
+        ).execute()
 
-            details = youtube.videos().list(
-                part="contentDetails",
-                id=",".join(video_ids)
-            ).execute()
+        for item in details.get("items", []):
+            sec = parse_duration(
+                item["contentDetails"]["duration"]
+            )
+            if 60 <= sec < 600:
+                vid = item["id"]
+                return {
+                    "youtube_video_id": vid,
+                    "youtube_url":      f"https://youtu.be/{vid}",
+                    "duration_seconds": sec,
+                }
 
-            for item in details.get("items", []):
-                sec = parse_duration(
-                    item["contentDetails"]["duration"]
-                )
-                if 60 <= sec < 600:
-                    vid = item["id"]
-                    return {
-                        "youtube_video_id": vid,
-                        "youtube_url": f"https://youtu.be/{vid}",
-                        "duration_seconds": sec,
-                    }
-
-        except Exception as e:
-            print(f"    ⚠️ YouTube検索失敗: {query} - {e}")
-            continue
+    except Exception as e:
+        print(f"    ⚠️ YouTube検索失敗: {artist} - {e}")
 
     return {}
+  
   
 def enrich_with_spotify(songs: list) -> list:
     """
