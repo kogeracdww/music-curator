@@ -273,58 +273,52 @@ def fetch_koreanindie() -> list:
 
 
 def fetch_bandcamp_tags() -> list:
-    """Bandcampのタグページからアジアのインディーアーティストを収集"""
+    """BandcampのタグRSSからアジアのインディーアーティストを収集"""
     songs = []
     tags = [
-        ("city-pop", "City Pop"),
-        ("j-indie", "J-Indie"),
-        ("k-indie", "K-Indie"),
-        ("thai-indie", "Thai Indie"),
-        ("indonesian-indie", "Indonesian Indie"),
+        ("city-pop",          "City Pop"),
+        ("japanese-indie",    "J-Indie"),
+        ("korean-indie",      "K-Indie"),
+        ("southeast-asian",   "SE Asia"),
     ]
 
     for tag, source_name in tags:
         try:
+            # BandcampのタグRSS
+            url = f"https://bandcamp.com/tag/{tag}?format=rss"
             resp = requests.get(
-                f"https://bandcamp.com/tag/{tag}?sort_field=date",
-                timeout=15,
+                url, timeout=15,
                 headers={"User-Agent": "Mozilla/5.0"}
             )
             if resp.status_code != 200:
-                print(f"  ⚠️ Bandcamp/{tag}: {resp.status_code}")
-                continue
+                # 通常ページから取得を試みる
+                url2 = f"https://bandcamp.com/tag/{tag}"
+                resp = requests.get(
+                    url2, timeout=15,
+                    headers={"User-Agent": "Mozilla/5.0"}
+                )
+                if resp.status_code != 200:
+                    print(f"  Bandcamp/{tag}: {resp.status_code}")
+                    continue
 
-            import json as json_mod
-            # data-blob属性からJSONを抽出
-            import re
-            match = re.search(
-                r'data-blob="([^"]+)"', resp.text
+            # JSON-LDまたはメタデータから抽出
+            matches = re.findall(
+                r'"name"\s*:\s*"([^"]+)"\s*,\s*"byArtist"\s*:\s*\{"@type"\s*:\s*"MusicGroup"\s*,\s*"name"\s*:\s*"([^"]+)"',
+                resp.text
             )
-            if match:
-                blob = match.group(1).replace('&quot;', '"')
-                try:
-                    data = json_mod.loads(blob)
-                    items = data.get("hub", {}).get(
-                        "tabs", [{}]
-                    )[0].get("items", [])
-                    count = 0
-                    for item in items[:8]:
-                        artist = item.get("band_name", "")
-                        title  = item.get("title", "")
-                        if artist and title:
-                            songs.append({
-                                "artist": artist,
-                                "title":  title,
-                                "album":  item.get("album_title", ""),
-                                "source": source_name,
-                            })
-                            count += 1
-                    print(f"  Bandcamp/{tag}: {count}曲")
-                except Exception:
-                    pass
-            else:
-                print(f"  Bandcamp/{tag}: データなし")
 
+            count = 0
+            for title, artist in matches[:6]:
+                if artist and title:
+                    songs.append({
+                        "artist": artist,
+                        "title":  title,
+                        "album":  "",
+                        "source": source_name,
+                    })
+                    count += 1
+
+            print(f"  Bandcamp/{tag}: {count}曲")
             time.sleep(0.5)
 
         except Exception as e:
@@ -356,6 +350,13 @@ def fetch_all_sources(hours: int = 24) -> list:
         "https://www.radiofrance.fr/fip/rss",
         "FIP"
     ))
+
+  # Spincoaster RSS（日本インディー）
+    spins = fetch_rss("https://spincoaster.com/feed", "Spincoaster")
+    if not spins:
+        # フォールバック
+        spins = fetch_rss("https://spincoaster.com/feed/", "Spincoaster")
+    all_songs.extend(spins)
 
     # 重複除去
     seen = set()
@@ -425,9 +426,21 @@ def classify_and_comment(songs: list) -> dict:
 """
 
     message = client.messages.create(
-        model="claude-sonnet-4-5",
-        max_tokens=3000,
-        messages=[{"role": "user", "content": prompt}]
+        # リトライ処理（過負荷対策）
+    for attempt in range(3):
+        try:
+            message = client.messages.create(
+                model="claude-sonnet-4-5",
+                max_tokens=3000,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            break
+        except Exception as e:
+            if attempt < 2:
+                print(f"  ⚠️ Claude API一時エラー、リトライ中... ({e})")
+                time.sleep(10)
+            else:
+                raise
     )
 
     raw = message.content[0].text.strip()
