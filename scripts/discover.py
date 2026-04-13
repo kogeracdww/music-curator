@@ -235,27 +235,45 @@ def fetch_rss(url: str, source_name: str) -> list:
     return songs
 
 def fetch_koreanindie() -> list:
-    """Korean IndieサイトをスクレイピングしてK-indie曲を収集"""
+    """Korean IndieのRSSを取得"""
     songs = []
     try:
         resp = requests.get(
-            "https://www.koreanindie.com/",
+            "https://www.koreanindie.com/feed/",
             timeout=15,
-            headers={"User-Agent": "Mozilla/5.0"}
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/rss+xml,application/xml,text/xml,*/*",
+            }
         )
         resp.raise_for_status()
+        content = resp.content
 
-        # h2タグからタイトルを抽出（「Artist : Title」形式）
-        import re
-        titles = re.findall(
-            r'<h2[^>]*>\s*<a[^>]*>([^<]+)</a>\s*</h2>',
-            resp.text
-        )
+        # 不正XML文字を除去
+        clean = re.sub(rb'[\x00-\x08\x0b\x0c\x0e-\x1f]', b'', content)
+        # CDATAやHTMLエンティティを含むXMLをパース
+        try:
+            root = ET.fromstring(clean)
+        except ET.ParseError as e:
+            # エラー位置の前後を切り取って再試行
+            print(f"  Korean Indie XML修正中: {e}")
+            # XMLの宣言部分を保持しつつ問題文字を除去
+            clean2 = re.sub(rb'&(?!amp;|lt;|gt;|quot;|apos;|#\d+;|#x[0-9a-fA-F]+;)', b'&amp;', clean)
+            try:
+                root = ET.fromstring(clean2)
+            except Exception:
+                print("  ⚠️ Korean Indie: XML解析断念")
+                return songs
 
-        for raw in titles:
-            raw = raw.strip()
-            if " : " in raw:
-                parts = raw.split(" : ", 1)
+        for item in root.findall(".//item"):
+            title_elem = item.find("title")
+            if title_elem is None or not title_elem.text:
+                continue
+            raw_title = title_elem.text.strip()
+
+            # 「Artist : Title」形式
+            if " : " in raw_title:
+                parts = raw_title.split(" : ", 1)
                 artist = parts[0].strip()
                 title  = parts[1].strip()
                 if artist and title:
@@ -273,53 +291,81 @@ def fetch_koreanindie() -> list:
 
 
 def fetch_bandcamp_tags() -> list:
-    """BandcampのタグRSSからアジアのインディーアーティストを収集"""
+    """BandcampタグページからJSONデータを抽出"""
     songs = []
     tags = [
-        ("city-pop",          "City Pop"),
-        ("japanese-indie",    "J-Indie"),
-        ("korean-indie",      "K-Indie"),
-        ("southeast-asian",   "SE Asia"),
+        ("city-pop",       "City Pop"),
+        ("j-indie",        "J-Indie"),
+        ("k-indie",        "K-Indie"),
+        ("thai-pop",       "Thai Pop"),
+        ("indonesian-pop", "Indonesian Pop"),
     ]
 
     for tag, source_name in tags:
         try:
-            # BandcampのタグRSS
-            url = f"https://bandcamp.com/tag/{tag}?format=rss"
             resp = requests.get(
-                url, timeout=15,
-                headers={"User-Agent": "Mozilla/5.0"}
+                f"https://bandcamp.com/tag/{tag}?sort_field=date",
+                timeout=15,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+                    "Accept-Language": "en-US,en;q=0.9",
+                }
             )
             if resp.status_code != 200:
-                # 通常ページから取得を試みる
-                url2 = f"https://bandcamp.com/tag/{tag}"
-                resp = requests.get(
-                    url2, timeout=15,
-                    headers={"User-Agent": "Mozilla/5.0"}
-                )
-                if resp.status_code != 200:
-                    print(f"  Bandcamp/{tag}: {resp.status_code}")
-                    continue
+                print(f"  Bandcamp/{tag}: HTTP {resp.status_code}")
+                continue
 
-            # JSON-LDまたはメタデータから抽出
-            matches = re.findall(
-                r'"name"\s*:\s*"([^"]+)"\s*,\s*"byArtist"\s*:\s*\{"@type"\s*:\s*"MusicGroup"\s*,\s*"name"\s*:\s*"([^"]+)"',
-                resp.text
+            # application/ld+jsonまたはdata-blobからデータ抽出
+            # 方法1: JSON-LD
+            ld_matches = re.findall(
+                r'<script type="application/ld\+json">(.*?)</script>',
+                resp.text, re.DOTALL
             )
-
             count = 0
-            for title, artist in matches[:6]:
-                if artist and title:
-                    songs.append({
-                        "artist": artist,
-                        "title":  title,
-                        "album":  "",
-                        "source": source_name,
-                    })
-                    count += 1
+            for ld in ld_matches:
+                try:
+                    data = json.loads(ld)
+                    items = data if isinstance(data, list) else [data]
+                    for item in items:
+                        if item.get("@type") in ("MusicRecording", "MusicAlbum"):
+                            title  = item.get("name", "")
+                            artist = ""
+                            by = item.get("byArtist", {})
+                            if isinstance(by, dict):
+                                artist = by.get("name", "")
+                            if artist and title:
+                                songs.append({
+                                    "artist": artist,
+                                    "title":  title,
+                                    "album":  "",
+                                    "source": source_name,
+                                })
+                                count += 1
+                                if count >= 5:
+                                    break
+                except Exception:
+                    continue
+                if count >= 5:
+                    break
+
+            # 方法2: 正規表現フォールバック
+            if count == 0:
+                matches = re.findall(
+                    r'"title"\s*:\s*"([^"]+)"[^}]*"band_name"\s*:\s*"([^"]+)"',
+                    resp.text
+                )
+                for title, artist in matches[:5]:
+                    if artist and title:
+                        songs.append({
+                            "artist": artist,
+                            "title":  title,
+                            "album":  "",
+                            "source": source_name,
+                        })
+                        count += 1
 
             print(f"  Bandcamp/{tag}: {count}曲")
-            time.sleep(0.5)
+            time.sleep(1)
 
         except Exception as e:
             print(f"  ⚠️ Bandcamp/{tag}失敗: {e}")
@@ -333,16 +379,16 @@ def fetch_all_sources(hours: int = 24) -> list:
     # KEXP API（欧米インディー）
     all_songs.extend(fetch_kexp(hours=hours))
 
-    # FIP RSS（ジャズ・ワールド・欧州）
+    # Spincoaster RSS（日本インディー）
     all_songs.extend(fetch_rss(
-        "https://www.radiofrance.fr/fip/rss.xml",
-        "FIP"
+        "https://spincoaster.com/feed",
+        "Spincoaster"
     ))
 
-    # Korean Indie（スクレイピング）
+    # Korean Indie RSS
     all_songs.extend(fetch_koreanindie())
 
-    # Bandcamp タグ検索（東南アジア・アジア）
+    # Bandcamp タグ（アジア系）
     all_songs.extend(fetch_bandcamp_tags())
 
     # FIP RSS（ジャズ・ワールド・欧州）
@@ -350,13 +396,6 @@ def fetch_all_sources(hours: int = 24) -> list:
         "https://www.radiofrance.fr/fip/rss",
         "FIP"
     ))
-
-  # Spincoaster RSS（日本インディー）
-    spins = fetch_rss("https://spincoaster.com/feed", "Spincoaster")
-    if not spins:
-        # フォールバック
-        spins = fetch_rss("https://spincoaster.com/feed/", "Spincoaster")
-    all_songs.extend(spins)
 
     # 重複除去
     seen = set()
