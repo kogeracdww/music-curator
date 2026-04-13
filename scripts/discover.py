@@ -409,9 +409,6 @@ def enrich_with_spotify(songs: list) -> list:
         sp = search_spotify(token, song["artist"], song["title"])
         if sp:
             song.update(sp)
-            # Audio Features取得
-            af = get_audio_features(token, sp["spotify_id"])
-            song.update(af)
             # Spotifyで確認できたアーティスト名・曲名で上書き（精度向上）
             song["artist"] = sp["artist_verified"]
             song["title"]  = sp["title_verified"]
