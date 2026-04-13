@@ -79,24 +79,32 @@ def get_spotify_token() -> str:
 def search_spotify(token: str, artist: str, title: str) -> dict:
     """Spotifyで曲を検索してTrack情報を取得"""
     try:
-        query = f"artist:{artist} track:{title}"
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # シンプルなクエリで検索
+        query = f"{artist} {title}"
         resp = requests.get(
             "https://api.spotify.com/v1/search",
-            headers={"Authorization": f"Bearer {token}"},
-            params={"q": query, "type": "track", "limit": 1},
+            headers=headers,
+            params={
+                "q": query,
+                "type": "track",
+                "limit": 1,
+                "market": "US",
+            },
             timeout=10
         )
-        items = resp.json().get("tracks", {}).get("items", [])
-        if not items:
-            # シンプルなクエリで再検索
-            resp2 = requests.get(
-                "https://api.spotify.com/v1/search",
-                headers={"Authorization": f"Bearer {token}"},
-                params={"q": f"{artist} {title}", "type": "track", "limit": 1},
-                timeout=10
-            )
-            items = resp2.json().get("tracks", {}).get("items", [])
 
+        if resp.status_code == 429:
+            print(f"    ⚠️ Spotifyレート制限 - スキップ")
+            return {}
+
+        if resp.status_code != 200:
+            print(f"    ⚠️ Spotify {resp.status_code}: {resp.text[:100]}")
+            return {}
+
+        data = resp.json()
+        items = data.get("tracks", {}).get("items", [])
         if not items:
             return {}
 
@@ -108,8 +116,9 @@ def search_spotify(token: str, artist: str, title: str) -> dict:
             "artist_verified": track["artists"][0]["name"],
             "title_verified":  track["name"],
         }
+
     except Exception as e:
-        print(f"    ⚠️ Spotify検索失敗: {artist} - {e}")
+        print(f"    ⚠️ Spotify検索例外: {artist} - {e}")
         return {}
 
 
