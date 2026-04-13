@@ -49,6 +49,85 @@ def get_youtube_client():
     return build("youtube", "v3", credentials=creds)
 
 
+def get_spotify_token() -> str:
+    """Spotify APIのアクセストークンを取得"""
+    import base64
+    client_id = os.environ["SPOTIFY_CLIENT_ID"]
+    client_secret = os.environ["SPOTIFY_CLIENT_SECRET"]
+
+    credentials = base64.b64encode(
+        f"{client_id}:{client_secret}".encode()
+    ).decode()
+
+    resp = requests.post(
+        "https://accounts.spotify.com/api/token",
+        headers={"Authorization": f"Basic {credentials}"},
+        data={"grant_type": "client_credentials"},
+        timeout=10
+    )
+    return resp.json()["access_token"]
+
+
+def search_spotify(token: str, artist: str, title: str) -> dict:
+    """Spotifyで曲を検索してTrack情報を取得"""
+    try:
+        query = f"artist:{artist} track:{title}"
+        resp = requests.get(
+            "https://api.spotify.com/v1/search",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"q": query, "type": "track", "limit": 1},
+            timeout=10
+        )
+        items = resp.json().get("tracks", {}).get("items", [])
+        if not items:
+            # シンプルなクエリで再検索
+            resp2 = requests.get(
+                "https://api.spotify.com/v1/search",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"q": f"{artist} {title}", "type": "track", "limit": 1},
+                timeout=10
+            )
+            items = resp2.json().get("tracks", {}).get("items", [])
+
+        if not items:
+            return {}
+
+        track = items[0]
+        return {
+            "spotify_id":      track["id"],
+            "spotify_url":     track["external_urls"]["spotify"],
+            "popularity":      track["popularity"],
+            "artist_verified": track["artists"][0]["name"],
+            "title_verified":  track["name"],
+        }
+    except Exception as e:
+        print(f"    ⚠️ Spotify検索失敗: {artist} - {e}")
+        return {}
+
+
+def get_audio_features(token: str, spotify_id: str) -> dict:
+    """
+    Spotify Audio Featuresを取得
+    valence（多幸感）・energy・tempo で朝・夜判定に使用
+    """
+    try:
+        resp = requests.get(
+            f"https://api.spotify.com/v1/audio-features/{spotify_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10
+        )
+        data = resp.json()
+        return {
+            "valence":      data.get("valence", 0.5),
+            "energy":       data.get("energy", 0.5),
+            "tempo":        data.get("tempo", 100),
+            "acousticness": data.get("acousticness", 0.5),
+        }
+    except Exception as e:
+        print(f"    ⚠️ Audio Features取得失敗: {e}")
+        return {}
+
+
 # ── ソース別収集 ──────────────────────────────────────
 
 def fetch_kexp(hours: int = 24) -> list:
@@ -168,6 +247,7 @@ def classify_and_comment(songs: list) -> dict:
 
     songs_text = "\n".join([
         f"{i+1}. {s['artist']} - {s['title']} [{s['source']}]"
+        f"{' [valence:{:.2f} energy:{:.2f}]'.format(s['valence'], s['energy']) if 'valence' in s else ''}"
         for i, s in enumerate(songs)
     ])
 
@@ -299,7 +379,36 @@ def search_youtube_video(youtube, artist: str, title: str) -> dict:
             continue
 
     return {}
+  
+def enrich_with_spotify(songs: list) -> list:
+    """
+    SpotifyでTrack情報・Audio Featuresを付加
+    valence・energyで朝・夜の事前振り分けに使用
+    """
+    try:
+        token = get_spotify_token()
+    except Exception as e:
+        print(f"  ⚠️ Spotify認証失敗: {e}")
+        return songs
 
+    enriched = []
+    for song in songs:
+        sp = search_spotify(token, song["artist"], song["title"])
+        if sp:
+            song.update(sp)
+            # Audio Features取得
+            af = get_audio_features(token, sp["spotify_id"])
+            song.update(af)
+            # Spotifyで確認できたアーティスト名・曲名で上書き（精度向上）
+            song["artist"] = sp["artist_verified"]
+            song["title"]  = sp["title_verified"]
+
+        enriched.append(song)
+        time.sleep(0.1)
+
+    found = sum(1 for s in enriched if "spotify_id" in s)
+    print(f"  Spotify: {found}/{len(enriched)}曲マッチ")
+    return enriched
 
 def enrich_with_youtube(youtube, songs: list,
                         n: int = 10, max_attempts: int = 20) -> list:
@@ -431,7 +540,11 @@ def main():
         raw_songs = random.sample(raw_songs, 30)
         print(f"  → 30曲にランダム絞り込み")
 
-    # Claude APIで振り分け
+    # Spotifyで曲情報・Audio Featuresを付加
+    print("\n🎵 Spotifyで曲情報を取得中...")
+    raw_songs = enrich_with_spotify(raw_songs)
+
+    # Claude APIで振り分け（Audio Features情報も渡す）
     print("\n🤖 朝・夜に振り分け中...")
     classified = classify_and_comment(raw_songs)
 
