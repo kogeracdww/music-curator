@@ -35,12 +35,8 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Download discovery data
-        uses: actions/download-artifact@v4
-        with:
-          name: discovery-data
-          path: data/
-        continue-on-error: true
+      - name: Create data directory
+        run: mkdir -p data
 
       - name: Generate video
         env:
