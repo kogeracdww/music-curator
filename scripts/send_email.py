@@ -137,41 +137,48 @@ def build_youtube_section(data: dict, slot: str) -> str:
     """
 
 
+# X投稿用楽器ジャンル（曜日関係なく固定）
+X_INSTRUMENTS = [
+    {"ja": "ドラム・パーカッション",               "en": "drums percussion",        "emoji": "🥁✨"},
+    {"ja": "サックス・クラリネット・フルート・横笛", "en": "saxophone clarinet flute", "emoji": "🎷✨"},
+    {"ja": "カリンバ・ハンドパン",                 "en": "kalimba handpan",          "emoji": "🎵💫"},
+    {"ja": "シンセ・電子楽器",                     "en": "synthesizer electronic",   "emoji": "🎹🔮"},
+    {"ja": "ウクレレ",                             "en": "ukulele",                  "emoji": "🎸🌟"},
+    {"ja": "ピアノ",                               "en": "piano",                    "emoji": "🎹✨"},
+]
+
+TIKTOK_INSTRUMENTS = [
+    {"ja": "ドラム・パーカッション",               "en": "drums percussion",        "emoji": "🥁✨"},
+    {"ja": "シンセ・電子楽器",                     "en": "synthesizer electronic",  "emoji": "🎹🔮"},
+    {"ja": "サックス・クラリネット・フルート・横笛", "en": "saxophone clarinet flute", "emoji": "🎷✨"},
+]
+
+# 後方互換性のため残す
+INSTRUMENT_GROUPS = {
+    i: {"label": f"Group {i}", "instruments": [inst["en"] for inst in X_INSTRUMENTS]}
+    for i in range(7)
+}
+
+
 def build_x_section(x_data: dict) -> str:
-    """X候補リストのHTMLセクションを生成（検索リンク方式）"""
-    if not x_data:
-        return ""
+    """X候補・TikTok候補リストのHTMLセクションを生成（固定ジャンル）"""
 
-    group = x_data.get("group", "")
-    weekday = x_data.get("weekday", 0)
-    instruments = INSTRUMENT_GROUPS[weekday]["instruments"]
-
-    rows = ""
-    emoji_pool = (
-        X_EMOJIS["beginner"] +
-        X_EMOJIS["advanced"] +
-        X_EMOJIS["unique"]
-    )
-
-    for i, instrument in enumerate(instruments):
-        emoji = emoji_pool[i % len(emoji_pool)]
-
-        # X検索URL（動画・新着・6日以内に絞る）
-        query = instrument.replace(" ", "%20")
+    # X検索リンク行
+    x_rows = ""
+    for inst in X_INSTRUMENTS:
+        query = inst["en"].replace(" ", "%20")
         search_url = (
             f"https://twitter.com/search?"
             f"q={query}%20filter%3Avideos"
             f"&f=live&src=typed_query"
         )
-
-        rows += f"""
+        x_rows += f"""
         <tr style="border-bottom:1px solid #eee;">
           <td style="padding:10px 8px; font-size:13px; color:#333;">
-            <strong>{i+1:02d}.</strong>
-            【{instrument}】<br>
+            <strong>【{inst['ja']}】</strong><br>
             <span style="font-size:12px; margin-top:4px; display:block;">
               🔍 <a href="{search_url}" style="color:#1da1f2;">
-                Xで「{instrument}」の演奏動画を検索
+                Xで「{inst['ja']}」の演奏動画を検索
               </a>
             </span>
             <span style="font-size:11px; color:#999;">
@@ -180,7 +187,32 @@ def build_x_section(x_data: dict) -> str:
           </td>
           <td style="padding:10px 8px; text-align:center;
                      font-size:22px; white-space:nowrap; width:80px;">
-            {emoji}
+            {inst['emoji']}
+          </td>
+        </tr>
+        """
+
+    # TikTok検索リンク行
+    tiktok_rows = ""
+    for inst in TIKTOK_INSTRUMENTS:
+        query = inst["en"].replace(" ", "%20")
+        search_url = f"https://www.tiktok.com/search?q={query}&type=video"
+        tiktok_rows += f"""
+        <tr style="border-bottom:1px solid #eee;">
+          <td style="padding:10px 8px; font-size:13px; color:#333;">
+            <strong>【{inst['ja']}】</strong><br>
+            <span style="font-size:12px; margin-top:4px; display:block;">
+              🔍 <a href="{search_url}" style="color:#000;">
+                TikTokで「{inst['ja']}」を検索
+              </a>
+            </span>
+            <span style="font-size:11px; color:#999;">
+              ※ デュエット投稿用
+            </span>
+          </td>
+          <td style="padding:10px 8px; text-align:center;
+                     font-size:22px; white-space:nowrap; width:80px;">
+            {inst['emoji']}
           </td>
         </tr>
         """
@@ -189,9 +221,7 @@ def build_x_section(x_data: dict) -> str:
     <div style="margin-bottom:24px;">
       <div style="background:#1da1f2; color:#fff; padding:16px 20px;
                   border-radius:10px 10px 0 0;">
-        <h2 style="margin:0; font-size:17px;">
-          𝕏 リポスト候補 · {group}
-        </h2>
+        <h2 style="margin:0; font-size:17px;">𝕏 リポスト候補</h2>
         <p style="margin:4px 0 0; color:#e0f0ff; font-size:12px;">
           リンクをクリック → 気に入った演奏動画を絵文字付きでリポスト
         </p>
@@ -206,19 +236,43 @@ def build_x_section(x_data: dict) -> str:
                        font-size:12px; color:#666;">絵文字</th>
           </tr>
         </thead>
-        <tbody>
-          {rows}
-        </tbody>
+        <tbody>{x_rows}</tbody>
       </table>
       <div style="padding:10px 12px; background:#f0f8ff;
                   border:1px solid #ddd; border-top:none;
                   font-size:12px; color:#666;">
-        ※ 絵文字はそのままリポストのコメントにお使いください<br>
-        ※ 新着順で表示されるので6日以内の投稿が上に来ます
+        ※ 絵文字はそのままリポストのコメントにお使いください
+      </div>
+    </div>
+
+    <div style="margin-bottom:24px;">
+      <div style="background:#000; color:#fff; padding:16px 20px;
+                  border-radius:10px 10px 0 0;">
+        <h2 style="margin:0; font-size:17px;">🎵 TikTok デュエット候補</h2>
+        <p style="margin:4px 0 0; color:#aaa; font-size:12px;">
+          リンクをクリック → 気に入った演奏動画でデュエット投稿
+        </p>
+      </div>
+      <table style="width:100%; border-collapse:collapse;
+                    border:1px solid #ddd; border-top:none;">
+        <thead>
+          <tr style="background:#f5f5f5;">
+            <th style="padding:8px; text-align:left;
+                       font-size:12px; color:#666;">楽器・検索リンク</th>
+            <th style="padding:8px; text-align:center;
+                       font-size:12px; color:#666;">絵文字</th>
+          </tr>
+        </thead>
+        <tbody>{tiktok_rows}</tbody>
+      </table>
+      <div style="padding:10px 12px; background:#f5f5f5;
+                  border:1px solid #ddd; border-top:none;
+                  font-size:12px; color:#666;">
+        ※ TikTokアプリでデュエット機能を使って投稿してください
       </div>
     </div>
     """
-
+    
 def build_full_email(date: str, morning_data: dict,
                      evening_data: dict, x_data: dict) -> str:
     """メール全体のHTMLを生成"""
