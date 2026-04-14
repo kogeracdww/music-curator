@@ -190,8 +190,7 @@ def update_selected_playlist(youtube, songs: list, slot: str):
                     "resourceId": {
                         "kind": "youtube#video",
                         "videoId": vid
-                    },
-                    "position": 0
+                    }
                 }}
             ).execute()
             added += 1
