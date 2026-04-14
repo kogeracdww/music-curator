@@ -672,14 +672,27 @@ def save_results(songs: list, slot: str, weekday: int, config: dict):
 
 # ── X候補データ生成 ───────────────────────────────────
 
+# X投稿用楽器ジャンル（曜日関係なく固定）
+X_INSTRUMENTS = [
+    {"ja": "ドラム・パーカッション",          "en": "drums percussion",      "emoji": "🥁✨"},
+    {"ja": "サックス・クラリネット・フルート・横笛", "en": "saxophone clarinet flute", "emoji": "🎷✨"},
+    {"ja": "カリンバ・ハンドパン",             "en": "kalimba handpan",       "emoji": "🎵💫"},
+    {"ja": "シンセ・電子楽器",                "en": "synthesizer electronic", "emoji": "🎹🔮"},
+    {"ja": "ウクレレ",                        "en": "ukulele",               "emoji": "🎸🌟"},
+    {"ja": "ピアノ",                          "en": "piano",                 "emoji": "🎹✨"},
+]
+
+# TikTok用楽器ジャンル
+TIKTOK_INSTRUMENTS = [
+    {"ja": "ドラム・パーカッション",          "en": "drums percussion",      "emoji": "🥁✨"},
+    {"ja": "シンセ・電子楽器",                "en": "synthesizer electronic", "emoji": "🎹🔮"},
+    {"ja": "サックス・クラリネット・フルート・横笛", "en": "saxophone clarinet flute", "emoji": "🎷✨"},
+]
+
+# 後方互換性のため残す
 INSTRUMENT_GROUPS = {
-    0: {"label": "Group A", "instruments": ["Vibraphone","Contrabass","Balalaika","Clarinet","Bassoon","Didgeridoo","Taiko","OP-1 synthesizer","Cymbals","Musical Saw"]},
-    1: {"label": "Group B", "instruments": ["Tambourine","Handpan","Snare Drum","Viola","Sitar","Sarod","Harmonica","French Horn","Harmonium","Angklung"]},
-    2: {"label": "Group C", "instruments": ["Marimba","Piano","Harp","Ocarina","Pipe Organ","Kalimba","Celesta","Mridangam","Tongue Drum","Roland TB-303"]},
-    3: {"label": "Group D", "instruments": ["Guitar","Mandolin","Flute","Trombone","Shakuhachi","Tabla","Balafon","Timpani","Xylophone","Djembe"]},
-    4: {"label": "Group E", "instruments": ["Violin","Koto","Gayageum","Charango","Recorder","Alphorn","Kalimba","Conga","Akai MPC","Theremin"]},
-    5: {"label": "Group F", "instruments": ["Cello","Shamisen","Saxophone","Oboe","Steelpan","Bongo drum","Bodhran","Guitarron","Roland TR-808","Theremin"]},
-    6: {"label": "Group G", "instruments": ["Handpan","Ukulele","Erhu","Oud","Trumpet","Tuba","Djembe","Glockenspiel","Mellotron","Biwa"]},
+    i: {"label": f"Group {i}", "instruments": [inst["en"] for inst in X_INSTRUMENTS]}
+    for i in range(7)
 }
 
 
